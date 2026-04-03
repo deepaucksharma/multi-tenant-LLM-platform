@@ -27,6 +27,7 @@ Read this if you are new to the repo and want to understand what the platform do
 | [flows.md](flows.md) | Small diagrams for runtime and lifecycle flows | Request path, data path, training path, quality loop, voice path |
 | [subsystems.md](subsystems.md) | Condensed module and ownership map | Which folder owns which concern |
 | [operations.md](operations.md) | Commands, endpoints, artifacts, CI/CD | Running, inspecting, or operating the platform |
+| [huggingface-jobs.md](huggingface-jobs.md) | HF Jobs launcher, presets, and artifact strategy | Offloading training, evals, tests, and builds to Hugging Face compute |
 | [repo-map.md](repo-map.md) | High-signal directory guide | Where to start reading and what to ignore at first |
 
 ## System Surfaces

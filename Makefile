@@ -1,8 +1,10 @@
-.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama serve-hf-inference check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry push-hub-private push-hub-merged push-datasets push-datasets-dry generate-colab docker-build docker-run eval web mobile voice monitor test clean all
+.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama serve-hf-inference check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry push-hub-private push-hub-merged push-datasets push-datasets-dry generate-colab docker-build docker-run eval web mobile voice monitor test hf-job hf-jobs-list hf-jobs-hardware hf-jobs-ci hf-jobs-build hf-jobs-train hf-jobs-align clean all
 
 PYTHON ?= python3
 PIP ?= pip3
 VENV := venv
+PRESET ?=
+JOB_ID ?=
 
 # ── Environment ────────────────────────────────────────────────────────────────
 setup:
@@ -162,6 +164,31 @@ test:
 
 test-cov:
 	$(PYTHON) -m pytest tests/ --cov --cov-report=html
+
+# ── Hugging Face Jobs ──────────────────────────────────────────────────────────
+hf-jobs-list:
+	$(PYTHON) scripts/hf_jobs.py list
+
+hf-jobs-hardware:
+	$(PYTHON) scripts/hf_jobs.py hardware
+
+hf-jobs-ci:
+	$(PYTHON) scripts/hf_jobs.py submit --suite ci
+
+hf-jobs-build:
+	$(PYTHON) scripts/hf_jobs.py submit --suite build-all
+
+hf-jobs-train:
+	$(PYTHON) scripts/hf_jobs.py submit --suite train-all
+
+hf-jobs-align:
+	$(PYTHON) scripts/hf_jobs.py submit --suite align-all
+
+hf-job:
+ifndef PRESET
+	$(error Usage: make hf-job PRESET=<preset-name>)
+endif
+	$(PYTHON) scripts/hf_jobs.py submit $(PRESET)
 
 # ── Full pipeline ──────────────────────────────────────────────────────────────
 all: data index train serve

@@ -12,6 +12,8 @@ def test_get_gpu_memory_info_uses_total_memory(monkeypatch):
     class FakeProps:
         total_memory = 8 * 1024**3
 
+    # Force CUDA path — prevent early-return via DirectML when DEVICE=dml in .env
+    monkeypatch.setenv("DEVICE", "cuda")
     monkeypatch.setattr(model_loader.torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(model_loader.torch.cuda, "memory_allocated", lambda: 2 * 1024**3)
     monkeypatch.setattr(model_loader.torch.cuda, "memory_reserved", lambda: 3 * 1024**3)

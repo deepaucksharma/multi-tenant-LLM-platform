@@ -137,7 +137,7 @@ def train_dpo_simple(
             loss_type=dpo_cfg.get("loss_type", "sigmoid"),
             max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
             max_length=dpo_cfg.get("max_length", 512),
-            no_cuda=runtime_cfg["device"] == "cpu",
+            use_cpu=runtime_cfg["device"] == "cpu",
         )
 
         trainer = DPOTrainer(

@@ -174,7 +174,7 @@ def train_sft(tenant_id: str, config_override: dict = None):
             greater_is_better=False,
             remove_unused_columns=False,
             dataloader_pin_memory=False,  # Save memory
-            no_cuda=runtime_cfg["device"] == "cpu",
+            use_cpu=runtime_cfg["device"] == "cpu",
         )
 
         # ---- Create trainer ----

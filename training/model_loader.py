@@ -117,7 +117,8 @@ def get_effective_torch_dtype(config: Dict[str, Any]):
     """Choose a dtype compatible with the active runtime."""
     dtype_str = config["model"].get("torch_dtype", "float16")
     preferred = getattr(torch, dtype_str)
-    if resolve_device() == "cpu" and preferred == torch.float16:
+    if resolve_device() in ("cpu", "dml") and preferred == torch.float16:
+        # float16 is unsafe for CPU training and DML training (instability)
         return torch.float32
     return preferred
 
@@ -238,8 +239,10 @@ def load_base_model_and_tokenizer(
         if device == "cuda":
             load_kwargs["device_map"] = {"": "cuda:0"}
         elif device == "dml":
-            import torch_directml
-            load_kwargs["device_map"] = {"": torch_directml.device()}
+            # DirectML does not support multi-threaded .to(device) during HF weight loading.
+            # Load to CPU first, then move to DML after model is fully constructed.
+            load_kwargs["device_map"] = {"": "cpu"}
+            load_kwargs["low_cpu_mem_usage"] = True
         else:
             load_kwargs["device_map"] = {"": "cpu"}
             load_kwargs["low_cpu_mem_usage"] = True
@@ -278,6 +281,14 @@ def load_base_model_and_tokenizer(
         model.config.use_cache = False
         if hasattr(model, "gradient_checkpointing_enable"):
             model.gradient_checkpointing_enable()
+
+    # For DirectML: move model to GPU after full construction on CPU
+    device = runtime["device"]
+    if device == "dml":
+        import torch_directml
+        dml_device = torch_directml.device()
+        logger.info(f"Moving model to DirectML device: {dml_device}")
+        model = model.to(dml_device)
 
     param_count = sum(p.numel() for p in model.parameters())
     trainable_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
