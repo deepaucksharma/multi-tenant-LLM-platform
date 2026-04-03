@@ -1,0 +1,428 @@
+# Series 4/6 — RAG, Inference, Routing, and Policies
+
+This phase connects your training outputs and data pipeline into a **production-style backend**. 
+
+You will build:
+1. **Tenant-isolated RAG** using Chroma
+2. **FastAPI inference server** with streaming
+3. **Dynamic adapter routing** (1 base model + N adapters)
+4. **Audit logging and policy filters**
+5. **A simple Canary/Rollback mechanism**
+
+This is the exact layer that separates a "notebook project" from an "engineering POC".
+
+---
+
+# 1. Tenant-Isolated RAG Strategy
+
+To guarantee zero cross-tenant leakage, the safest and most explicit method is to use **separate Chroma collections** for each tenant.
+
+## `rag/build_index.py`
+
+This script reads your chunks and builds the vector index.
+
+```python
+# rag/build_index.py
+import json
+import chromadb
+from pathlib import Path
+from sentence_transformers import SentenceTransformer
+
+CHROMA_DIR = Path("data/chroma")
+CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
+def main():
+    # Initialize local persistent Chroma
+    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    
+    # Load lightweight embedding model
+    print("Loading embedding model...")
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+    for tenant_id in ["sis", "mfg"]:
+        chunk_file = Path(f"data/chunks/{tenant_id}_chunks.jsonl")
+        if not chunk_file.exists():
+            continue
+
+        print(f"Processing {tenant_id}...")
+        
+        # Create or reset collection
+        try:
+            client.delete_collection(name=f"{tenant_id}_docs")
+        except:
+            pass
+        collection = client.create_collection(name=f"{tenant_id}_docs")
+
+        docs, metadatas, ids, embeddings = [], [], [], []
+
+        with open(chunk_file, "r", encoding="utf-8") as f:
+            for line in f:
+                chunk = json.loads(line)
+                docs.append(chunk["text"])
+                metadatas.append({"title": chunk["title"], "source": chunk["source"]})
+                ids.append(chunk["chunk_id"])
+
+        # Create embeddings in batches
+        batch_size = 64
+        for i in range(0, len(docs), batch_size):
+            batch_docs = docs[i:i+batch_size]
+            batch_embs = embedder.encode(batch_docs).tolist()
+            
+            collection.add(
+                documents=batch_docs,
+                embeddings=batch_embs,
+                metadatas=metadatas[i:i+batch_size],
+                ids=ids[i:i+batch_size]
+            )
+            print(f"  Indexed {min(i+batch_size, len(docs))}/{len(docs)} chunks")
+
+    print("Indexing complete.")
+
+if __name__ == "__main__":
+    main()
+```
+
+Run this once: `python rag/build_index.py`.
+
+---
+
+# 2. Dynamic Adapter Manager (The 8GB VRAM Secret)
+
+You cannot load multiple full models into 8GB VRAM. 
+But you **can** load 1 base model and inject both adapters simultaneously using PEFT's `load_adapter` and `set_adapter` methods.
+
+**This is a massive flex for an interview.** It proves you know how to serve multiple tenants cheaply.
+
+## `inference/model_manager.py`
+
+```python
+# inference/model_manager.py
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from peft import PeftModel
+
+BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+
+class MultiTenantModelManager:
+    def __init__(self):
+        print("Loading tokenizer...")
+        self.tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+        
+        print("Loading 4-bit base model...")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        
+        base_model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL,
+            quantization_config=bnb_config,
+            device_map="auto"
+        )
+
+        print("Loading tenant adapters...")
+        # Load the first adapter and initialize PeftModel
+        self.model = PeftModel.from_pretrained(
+            base_model, 
+            "models/adapters/sis", 
+            adapter_name="sis"
+        )
+        
+        # Load the second adapter into the same model
+        self.model.load_adapter("models/adapters/mfg", adapter_name="mfg")
+        
+        print("Model Manager ready.")
+
+    def set_tenant(self, tenant_id: str):
+        """Hot-swap the active adapter instantly."""
+        if tenant_id in ["sis", "mfg"]:
+            self.model.set_adapter(tenant_id)
+        else:
+            # Fallback to base model if unknown tenant
+            self.model.disable_adapters()
+
+model_manager = MultiTenantModelManager()
+```
+
+---
+
+# 3. RAG Retrieval & Prompt Construction
+
+## `inference/retriever.py`
+
+```python
+# inference/retriever.py
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+client = chromadb.PersistentClient(path="data/chroma")
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+SYSTEM_PROMPTS = {
+    "sis": "You are a Student Information System assistant. Answer using ONLY the provided context. If the answer is not in the context, say 'I do not have enough verified context.' Cite sources. Do not reveal unauthorized student data.",
+    "mfg": "You are a Manufacturing Operations assistant. Answer using ONLY the provided context. Never suggest bypassing safety rules. Cite sources. If unclear, recommend escalating to a supervisor."
+}
+
+def get_context(tenant_id: str, query: str, top_k: int = 3):
+    try:
+        collection = client.get_collection(name=f"{tenant_id}_docs")
+    except:
+        return "", []
+
+    query_emb = embedder.encode([query]).tolist()
+    results = collection.query(query_embeddings=query_emb, n_results=top_k)
+    
+    if not results["documents"][0]:
+        return "", []
+
+    context_texts = []
+    sources = set()
+    
+    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+        context_texts.append(f"Excerpt from {meta['title']}:\n{doc}")
+        sources.add(meta['title'])
+        
+    return "\n\n".join(context_texts), list(sources)
+
+def build_prompt(tenant_id: str, query: str, context: str):
+    sys_prompt = SYSTEM_PROMPTS.get(tenant_id, "You are a helpful assistant.")
+    
+    if context:
+        user_msg = f"Context:\n{context}\n\nQuestion: {query}"
+    else:
+        user_msg = query
+
+    return [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg}
+    ]
+```
+
+---
+
+# 4. Audit Logging & Compliance
+
+For the POC, write an audit log to a local SQLite database.
+
+## `inference/audit.py`
+
+```python
+# inference/audit.py
+import sqlite3
+import time
+
+DB_PATH = "logs/audit.db"
+
+def init_db():
+    import os
+    os.makedirs("logs", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL,
+            tenant_id TEXT,
+            adapter_version TEXT,
+            query TEXT,
+            sources TEXT,
+            latency REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def log_request(tenant_id, adapter_version, query, sources, latency):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO requests (timestamp, tenant_id, adapter_version, query, sources, latency) VALUES (?, ?, ?, ?, ?, ?)",
+        (time.time(), tenant_id, adapter_version, query, str(sources), latency)
+    )
+    conn.commit()
+    conn.close()
+
+init_db()
+```
+
+---
+
+# 5. Canary / A/B Routing Design
+
+To prove you understand MLOps deployments, mock a canary router. 
+In a real environment, this routes traffic between a stable and a candidate model.
+
+## `inference/router.py`
+
+```python
+# inference/router.py
+import random
+
+# Mock configuration that would normally come from a control plane
+ROUTING_CONFIG = {
+    "sis": {
+        "stable": "sis",           # The standard SFT adapter
+        "candidate": "sis_dpo",    # The aligned adapter
+        "candidate_weight": 0.10   # 10% of traffic goes to candidate
+    },
+    "mfg": {
+        "stable": "mfg",
+        "candidate": "mfg",
+        "candidate_weight": 0.0
+    }
+}
+
+def resolve_adapter(tenant_id: str) -> str:
+    """Decides which adapter to use based on Canary rules."""
+    config = ROUTING_CONFIG.get(tenant_id)
+    if not config:
+        return tenant_id
+    
+    if random.random() < config["candidate_weight"]:
+        return config["candidate"]
+    return config["stable"]
+```
+*(Note: If you didn't train `sis_dpo`, just set candidate weight to 0. The presence of the logic is what counts).*
+
+---
+
+# 6. FastAPI Server with SSE Streaming
+
+This brings it all together.
+
+## `inference/main.py`
+
+```python
+# inference/main.py
+import time
+import json
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from threading import Thread
+from transformers import TextIteratorStreamer
+
+from inference.model_manager import model_manager
+from inference.retriever import get_context, build_prompt
+from inference.audit import log_request
+from inference.router import resolve_adapter
+
+app = FastAPI(title="Multi-Tenant LLM API")
+
+class ChatRequest(BaseModel):
+    tenant_id: str
+    query: str
+
+@app.post("/v1/chat")
+async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
+    start_time = time.time()
+    
+    # 1. Canary Router: determine which adapter version to use
+    adapter_name = resolve_adapter(req.tenant_id)
+    
+    # 2. Swap to the correct tenant adapter in memory instantly
+    model_manager.set_tenant(adapter_name)
+    
+    # 3. Retrieve context
+    context, sources = get_context(req.tenant_id, req.query)
+    
+    # 4. Build prompt
+    messages = build_prompt(req.tenant_id, req.query, context)
+    text_input = model_manager.tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    
+    inputs = model_manager.tokenizer(text_input, return_tensors="pt").to("cuda")
+
+    # 5. Setup Streamer
+    streamer = TextIteratorStreamer(
+        model_manager.tokenizer, 
+        skip_prompt=True, 
+        skip_special_tokens=True
+    )
+    
+    generation_kwargs = dict(
+        **inputs,
+        max_new_tokens=256,
+        do_sample=False,
+        temperature=0.0,
+        streamer=streamer
+    )
+
+    # 6. Run generation in background thread
+    thread = Thread(target=model_manager.model.generate, kwargs=generation_kwargs)
+    thread.start()
+
+    async def event_generator():
+        full_response = ""
+        # Yield tokens as they arrive
+        for text in streamer:
+            full_response += text
+            yield f"data: {json.dumps({'token': text})}\n\n"
+        
+        # Yield sources at the end
+        yield f"data: {json.dumps({'sources': sources})}\n\n"
+        yield "data: [DONE]\n\n"
+        
+        # Log to audit DB
+        latency = time.time() - start_time
+        log_request(req.tenant_id, adapter_name, req.query, sources, latency)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+```
+
+---
+
+# 7. How to run and test
+
+Start the FastAPI server:
+```bash
+uvicorn inference.main:app --host 0.0.0.0 --port 8000
+```
+
+Open a new terminal and test the streaming API using `curl`:
+
+**Test Tenant A (SIS):**
+```bash
+curl -N -X POST http://localhost:8000/v1/chat \
+     -H "Content-Type: application/json" \
+     -d '{"tenant_id": "sis", "query": "How do I request a transcript?"}'
+```
+
+**Test Tenant B (Manufacturing):**
+```bash
+curl -N -X POST http://localhost:8000/v1/chat \
+     -H "Content-Type: application/json" \
+     -d '{"tenant_id": "mfg", "query": "What PPE is required for assembly line startup?"}'
+```
+
+**Test Cross-Tenant Leakage (Should Fail/Refuse):**
+```bash
+curl -N -X POST http://localhost:8000/v1/chat \
+     -H "Content-Type: application/json" \
+     -d '{"tenant_id": "mfg", "query": "How do I request a student transcript?"}'
+```
+*(Because it queries the manufacturing Chroma DB and uses the manufacturing system prompt, it should politely state it doesn't have the context).*
+
+---
+
+# 8. What "Done" looks like for Series 4
+
+You have succeeded in this phase when:
+1. The API starts and loads the base model and both adapters without running out of VRAM.
+2. You can send a request for `sis` and get an education answer.
+3. You can immediately send a request for `mfg` and get an industrial answer.
+4. Both responses stream back token-by-token.
+5. Both responses return citations (`sources`) at the end of the stream.
+6. A SQLite database (`logs/audit.db`) successfully records the queries, latencies, and adapter version used.
+
+### Interview Talking Points
+If an interviewer asks how you handled multi-tenancy at inference time:
+> "To optimize GPU memory, I didn't load separate models. I loaded one 4-bit base model, and loaded the PEFT LoRA adapters for each tenant into the same model instance. At request time, the FastAPI router reads the `tenant_id`, swaps the active adapter using `set_adapter`, retrieves context from the tenant's isolated Chroma collection, and streams the response back. This architecture scales cost-effectively to dozens of tenants on a single GPU."
+
+---
+
+If you are ready for the UI layer, reply **"next"** for **Series 5/6**, covering:
+- Next.js / Streamlit Web Chat UI
+- Minimal Expo React Native Mobile Client
+- Faster-Whisper Voice Integration Pipeline

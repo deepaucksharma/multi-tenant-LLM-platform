@@ -1,0 +1,1480 @@
+
+
+# Series 6 of 10: Web Application (`web_app/`)
+
+This covers the Next.js web frontend with tenant selection, streaming chat, citation display, feedback collection, monitoring dashboard, and side-by-side model comparison.
+
+---
+
+## File 1: `web_app/package.json`
+
+```json
+{
+  "name": "multi-tenant-llm-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-markdown": "^9.0.0",
+    "lucide-react": "^0.400.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.0"
+  }
+}
+```
+
+---
+
+## File 2: `web_app/next.config.js`
+
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://localhost:8000/:path*',
+      },
+    ];
+  },
+};
+
+module.exports = nextConfig;
+```
+
+---
+
+## File 3: `web_app/tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+```
+
+---
+
+## File 4: `web_app/tailwind.config.js`
+
+```javascript
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
+  theme: {
+    extend: {
+      colors: {
+        sis: { 50: '#eff6ff', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' },
+        mfg: { 50: '#f0fdf4', 500: '#22c55e', 600: '#16a34a', 700: '#15803d' },
+      },
+    },
+  },
+  plugins: [],
+};
+```
+
+---
+
+## File 5: `web_app/postcss.config.js`
+
+```javascript
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+```
+
+---
+
+## File 6: `web_app/src/app/globals.css`
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+/* Streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.streaming-cursor::after {
+  content: '▋';
+  animation: blink 1s infinite;
+  color: #3b82f6;
+}
+
+/* Markdown in messages */
+.message-content h1,
+.message-content h2,
+.message-content h3 { font-weight: 600; margin-top: 0.5em; }
+.message-content ul, .message-content ol { padding-left: 1.5em; margin: 0.5em 0; }
+.message-content li { margin: 0.25em 0; }
+.message-content p { margin: 0.5em 0; }
+.message-content code {
+  background: #f1f5f9; padding: 0.1em 0.3em;
+  border-radius: 3px; font-size: 0.9em;
+}
+```
+
+---
+
+## File 7: `web_app/src/app/layout.tsx`
+
+```tsx
+import type { Metadata } from 'next';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: 'Multi-Tenant LLM Platform',
+  description: 'Domain-adapted AI assistant with tenant isolation',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body className="bg-gray-50 min-h-screen">{children}</body>
+    </html>
+  );
+}
+```
+
+---
+
+## File 8: `web_app/src/app/page.tsx`
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import Chat from './components/Chat';
+import TenantSelector from './components/TenantSelector';
+import Sidebar from './components/Sidebar';
+import MonitoringPanel from './components/MonitoringPanel';
+
+type ViewMode = 'chat' | 'monitoring' | 'compare';
+
+export default function Home() {
+  const [tenantId, setTenantId] = useState<string>('sis');
+  const [viewMode, setViewMode] = useState<ViewMode>('chat');
+
+  return (
+    <div className="flex h-screen">
+      {/* Sidebar */}
+      <Sidebar
+        currentTenant={tenantId}
+        onTenantChange={setTenantId}
+        viewMode={viewMode}
+        onViewChange={setViewMode}
+      />
+
+      {/* Main content */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Top bar */}
+        <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold text-gray-800">
+              {tenantId === 'sis' ? '🏫 SIS Assistant' : '🏭 Manufacturing Assistant'}
+            </h1>
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+              tenantId === 'sis'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-green-100 text-green-700'
+            }`}>
+              {tenantId.toUpperCase()}
+            </span>
+          </div>
+          <div className="flex items-center gap-4">
+            <TenantSelector
+              currentTenant={tenantId}
+              onTenantChange={setTenantId}
+            />
+            <div className="flex gap-1">
+              {(['chat', 'monitoring', 'compare'] as ViewMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-3 py-1.5 text-sm rounded-md capitalize ${
+                    viewMode === mode
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        {/* Content */}
+        <div className="flex-1 overflow-hidden">
+          {viewMode === 'chat' && (
+            <Chat tenantId={tenantId} />
+          )}
+          {viewMode === 'monitoring' && (
+            <MonitoringPanel tenantId={tenantId} />
+          )}
+          {viewMode === 'compare' && (
+            <div className="flex h-full gap-2 p-2">
+              <div className="flex-1 border rounded-lg overflow-hidden">
+                <div className="bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 border-b">
+                  SIS Tenant
+                </div>
+                <Chat tenantId="sis" compact />
+              </div>
+              <div className="flex-1 border rounded-lg overflow-hidden">
+                <div className="bg-green-50 px-3 py-2 text-sm font-medium text-green-700 border-b">
+                  MFG Tenant
+                </div>
+                <Chat tenantId="mfg" compact />
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+```
+
+---
+
+## File 9: `web_app/src/app/components/Sidebar.tsx`
+
+```tsx
+'use client';
+
+interface SidebarProps {
+  currentTenant: string;
+  onTenantChange: (tenant: string) => void;
+  viewMode: string;
+  onViewChange: (view: any) => void;
+}
+
+const SAMPLE_QUESTIONS: Record<string, string[]> = {
+  sis: [
+    'What documents are required for enrollment?',
+    'How does FERPA protect student records?',
+    'What happens after 5 unexcused absences?',
+    'What is the grade change procedure?',
+    'Who can access IEP records?',
+    'Can a homeless student be denied enrollment?',
+    'How are mid-year transfer grades calculated?',
+    'What is the directory information opt-out process?',
+  ],
+  mfg: [
+    'What is the assembly line startup sequence?',
+    'How are critical defects handled?',
+    'What is the lockout/tagout procedure?',
+    'What triggers a CAPA?',
+    'What PPE is required in the welding zone?',
+    'What is the First Article Inspection process?',
+    'How is the Risk Priority Number calculated?',
+    'What are the maintenance priority response times?',
+  ],
+};
+
+export default function Sidebar({ currentTenant, onTenantChange, viewMode, onViewChange }: SidebarProps) {
+  const questions = SAMPLE_QUESTIONS[currentTenant] || [];
+
+  return (
+    <aside className="w-72 bg-gray-900 text-white flex flex-col h-screen">
+      {/* Logo */}
+      <div className="px-4 py-5 border-b border-gray-700">
+        <h2 className="text-lg font-bold">🤖 LLM Platform</h2>
+        <p className="text-xs text-gray-400 mt-1">Multi-Tenant POC</p>
+      </div>
+
+      {/* Tenant switch */}
+      <div className="px-4 py-3 border-b border-gray-700">
+        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Tenant</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onTenantChange('sis')}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+              currentTenant === 'sis'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            🏫 SIS
+          </button>
+          <button
+            onClick={() => onTenantChange('mfg')}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+              currentTenant === 'mfg'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            🏭 MFG
+          </button>
+        </div>
+      </div>
+
+      {/* Sample questions */}
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Try these questions</p>
+        <div className="space-y-1.5">
+          {questions.map((q, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                const event = new CustomEvent('sample-question', { detail: q });
+                window.dispatchEvent(event);
+                onViewChange('chat');
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-gray-300 rounded-md
+                         hover:bg-gray-700 transition-colors line-clamp-2"
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-gray-700">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span className="w-2 h-2 bg-green-400 rounded-full"></span>
+          Server connected
+        </div>
+        <p className="text-xs text-gray-600 mt-1">
+          Qwen2.5-1.5B + LoRA adapters
+        </p>
+      </div>
+    </aside>
+  );
+}
+```
+
+---
+
+## File 10: `web_app/src/app/components/TenantSelector.tsx`
+
+```tsx
+'use client';
+
+interface TenantSelectorProps {
+  currentTenant: string;
+  onTenantChange: (tenant: string) => void;
+}
+
+export default function TenantSelector({ currentTenant, onTenantChange }: TenantSelectorProps) {
+  return (
+    <select
+      value={currentTenant}
+      onChange={(e) => onTenantChange(e.target.value)}
+      className="bg-gray-100 border border-gray-300 rounded-md px-3 py-1.5 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    >
+      <option value="sis">🏫 SIS — Education</option>
+      <option value="mfg">🏭 MFG — Manufacturing</option>
+    </select>
+  );
+}
+```
+
+---
+
+## File 11: `web_app/src/app/components/MessageBubble.tsx`
+
+```tsx
+'use client';
+
+import ReactMarkdown from 'react-markdown';
+
+interface Citation {
+  title: string;
+  topic: string;
+  source_file: string;
+  relevance_score: number;
+  citation_key: string;
+}
+
+interface MessageBubbleProps {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  citations?: Citation[];
+  metadata?: {
+    model_type?: string;
+    latency_ms?: number;
+    grounding_score?: number;
+    retrieval_method?: string;
+    is_canary?: boolean;
+    request_id?: string;
+  };
+  isStreaming?: boolean;
+  tenantId?: string;
+  onFeedback?: (rating: number) => void;
+}
+
+export default function MessageBubble({
+  role,
+  content,
+  citations,
+  metadata,
+  isStreaming,
+  tenantId,
+  onFeedback,
+}: MessageBubbleProps) {
+  if (role === 'user') {
+    return (
+      <div className="flex justify-end mb-4">
+        <div className="max-w-[75%] bg-blue-600 text-white rounded-2xl rounded-br-md px-4 py-3">
+          <p className="text-sm whitespace-pre-wrap">{content}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const accentColor = tenantId === 'mfg' ? 'green' : 'blue';
+
+  return (
+    <div className="flex justify-start mb-4">
+      <div className="max-w-[85%]">
+        {/* Avatar */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs
+            ${tenantId === 'mfg' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}
+          >
+            {tenantId === 'mfg' ? '🏭' : '🏫'}
+          </span>
+          <span className="text-xs text-gray-500">
+            {tenantId?.toUpperCase()} Assistant
+          </span>
+          {metadata?.is_canary && (
+            <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">
+              canary
+            </span>
+          )}
+        </div>
+
+        {/* Message body */}
+        <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
+          <div className={`message-content text-sm text-gray-800 ${isStreaming ? 'streaming-cursor' : ''}`}>
+            <ReactMarkdown>{content || ' '}</ReactMarkdown>
+          </div>
+
+          {/* Citations */}
+          {citations && citations.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs font-medium text-gray-500 mb-1.5">📚 Sources</p>
+              <div className="space-y-1">
+                {citations.map((c, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 text-xs bg-gray-50 rounded-md px-2 py-1.5"
+                  >
+                    <span className={`w-5 h-5 rounded flex items-center justify-center text-white text-[10px] font-bold
+                      ${tenantId === 'mfg' ? 'bg-green-500' : 'bg-blue-500'}`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="text-gray-700 font-medium">{c.title}</span>
+                    <span className="text-gray-400">•</span>
+                    <span className="text-gray-500">{c.topic}</span>
+                    <span className="ml-auto text-gray-400">
+                      {(c.relevance_score * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Metadata & Feedback */}
+          {metadata && !isStreaming && (
+            <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
+              <div className="flex gap-3 text-[11px] text-gray-400">
+                {metadata.latency_ms && (
+                  <span>⏱ {Math.round(metadata.latency_ms)}ms</span>
+                )}
+                {metadata.model_type && (
+                  <span>🔧 {metadata.model_type}</span>
+                )}
+                {metadata.grounding_score !== undefined && metadata.grounding_score !== null && (
+                  <span>📐 {(metadata.grounding_score * 100).toFixed(0)}% grounded</span>
+                )}
+                {metadata.retrieval_method && (
+                  <span>🔍 {metadata.retrieval_method}</span>
+                )}
+              </div>
+              {onFeedback && (
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onFeedback(5)}
+                    className="p-1 hover:bg-green-50 rounded text-gray-400 hover:text-green-600"
+                    title="Good response"
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={() => onFeedback(1)}
+                    className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"
+                    title="Bad response"
+                  >
+                    👎
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## File 12: `web_app/src/app/components/Chat.tsx`
+
+```tsx
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import MessageBubble from './MessageBubble';
+
+interface Citation {
+  title: string;
+  topic: string;
+  source_file: string;
+  relevance_score: number;
+  citation_key: string;
+}
+
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: Citation[];
+  metadata?: Record<string, any>;
+  isStreaming?: boolean;
+}
+
+interface ChatProps {
+  tenantId: string;
+  compact?: boolean;
+}
+
+const API_BASE = '/api';
+
+export default function Chat({ tenantId, compact = false }: ChatProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [useRag, setUseRag] = useState(true);
+  const [useStreaming, setUseStreaming] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Auto-scroll
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  // Listen for sample question events from sidebar
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      setInput(e.detail);
+      inputRef.current?.focus();
+    };
+    window.addEventListener('sample-question', handler as EventListener);
+    return () => window.removeEventListener('sample-question', handler as EventListener);
+  }, []);
+
+  // Clear messages when tenant changes
+  useEffect(() => {
+    setMessages([]);
+  }, [tenantId]);
+
+  const generateId = () => Math.random().toString(36).substring(2, 10);
+
+  const sendMessage = async () => {
+    const userMessage = input.trim();
+    if (!userMessage || isLoading) return;
+
+    const userMsg: Message = {
+      id: generateId(),
+      role: 'user',
+      content: userMessage,
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInput('');
+    setIsLoading(true);
+
+    const assistantId = generateId();
+
+    if (useStreaming) {
+      await sendStreaming(userMessage, assistantId);
+    } else {
+      await sendNonStreaming(userMessage, assistantId);
+    }
+
+    setIsLoading(false);
+  };
+
+  const sendStreaming = async (userMessage: string, assistantId: string) => {
+    // Add empty assistant message
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: 'assistant', content: '', isStreaming: true },
+    ]);
+
+    try {
+      const conversationHistory = messages.slice(-6).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      abortRef.current = new AbortController();
+
+      const response = await fetch(`${API_BASE}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          message: userMessage,
+          conversation_history: conversationHistory,
+          use_rag: useRag,
+          use_streaming: true,
+          max_new_tokens: 512,
+          temperature: 0.7,
+        }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullContent = '';
+      let citations: Citation[] = [];
+      let metadata: Record<string, any> = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            const eventType = line.substring(6).trim();
+            continue;
+          }
+          if (line.startsWith('data:')) {
+            const dataStr = line.substring(5).trim();
+            if (!dataStr) continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (data.token !== undefined) {
+                fullContent += data.token;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, content: fullContent, isStreaming: true }
+                      : m
+                  )
+                );
+              }
+
+              if (data.citations) {
+                citations = data.citations;
+              }
+
+              if (data.request_id) {
+                metadata = {
+                  request_id: data.request_id,
+                  latency_ms: data.latency_ms,
+                  model_type: data.model_type,
+                  is_canary: data.is_canary,
+                };
+              }
+
+              if (data.error) {
+                fullContent += `\n\n⚠️ Error: ${data.error}`;
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+
+      // Finalize message
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: fullContent, citations, metadata, isStreaming: false }
+            : m
+        )
+      );
+    } catch (error: any) {
+      if (error.name === 'AbortError') return;
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: `⚠️ Connection error: ${error.message}. Is the server running on port 8000?`,
+                isStreaming: false,
+              }
+            : m
+        )
+      );
+    }
+  };
+
+  const sendNonStreaming = async (userMessage: string, assistantId: string) => {
+    try {
+      const conversationHistory = messages.slice(-6).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const response = await fetch(`${API_BASE}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          message: userMessage,
+          conversation_history: conversationHistory,
+          use_rag: useRag,
+          use_streaming: false,
+          max_new_tokens: 512,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const assistantMsg: Message = {
+        id: assistantId,
+        role: 'assistant',
+        content: data.message,
+        citations: data.citations,
+        metadata: {
+          request_id: data.request_id,
+          latency_ms: data.latency_ms,
+          model_type: data.model_type,
+          grounding_score: data.grounding_score,
+          retrieval_method: data.retrieval_method,
+          is_canary: false,
+        },
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (error: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: `⚠️ Error: ${error.message}. Make sure the inference server is running.`,
+        },
+      ]);
+    }
+  };
+
+  const handleFeedback = async (requestId: string, rating: number) => {
+    try {
+      await fetch(`${API_BASE}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_id: requestId,
+          tenant_id: tenantId,
+          rating,
+          feedback_type: 'thumbs',
+        }),
+      });
+    } catch {
+      // Silently fail for feedback
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <div className={`flex flex-col h-full ${compact ? '' : ''}`}>
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {messages.length === 0 && (
+          <div className="flex items-center justify-center h-full text-gray-400">
+            <div className="text-center">
+              <p className="text-4xl mb-3">
+                {tenantId === 'sis' ? '🏫' : '🏭'}
+              </p>
+              <p className="text-lg font-medium">
+                {tenantId === 'sis'
+                  ? 'SIS Assistant'
+                  : 'Manufacturing Assistant'}
+              </p>
+              <p className="text-sm mt-1">
+                Ask a question about{' '}
+                {tenantId === 'sis'
+                  ? 'enrollment, attendance, grading, FERPA...'
+                  : 'SOPs, quality control, safety, maintenance...'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg) => (
+          <MessageBubble
+            key={msg.id}
+            role={msg.role}
+            content={msg.content}
+            citations={msg.citations}
+            metadata={msg.metadata}
+            isStreaming={msg.isStreaming}
+            tenantId={tenantId}
+            onFeedback={
+              msg.role === 'assistant' && msg.metadata?.request_id
+                ? (rating) => handleFeedback(msg.metadata!.request_id, rating)
+                : undefined
+            }
+          />
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="border-t border-gray-200 bg-white px-4 py-3">
+        {/* Options */}
+        <div className="flex items-center gap-4 mb-2">
+          <label className="flex items-center gap-1.5 text-xs text-gray-500">
+            <input
+              type="checkbox"
+              checked={useRag}
+              onChange={(e) => setUseRag(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600"
+            />
+            RAG
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-gray-500">
+            <input
+              type="checkbox"
+              checked={useStreaming}
+              onChange={(e) => setUseStreaming(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600"
+            />
+            Stream
+          </label>
+          {messages.length > 0 && (
+            <button
+              onClick={() => setMessages([])}
+              className="text-xs text-gray-400 hover:text-gray-600 ml-auto"
+            >
+              Clear chat
+            </button>
+          )}
+        </div>
+
+        {/* Input */}
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={`Ask about ${tenantId === 'sis' ? 'student information' : 'manufacturing operations'}...`}
+            className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-2.5
+                       text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                       focus:border-transparent min-h-[44px] max-h-[120px]"
+            rows={1}
+            disabled={isLoading}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isLoading || !input.trim()}
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium text-white
+                       transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                       ${tenantId === 'mfg'
+                         ? 'bg-green-600 hover:bg-green-700'
+                         : 'bg-blue-600 hover:bg-blue-700'
+                       }`}
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-1">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </span>
+            ) : (
+              'Send'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## File 13: `web_app/src/app/components/MonitoringPanel.tsx`
+
+```tsx
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+
+interface Stats {
+  total_requests: number;
+  avg_latency_ms: number;
+  max_latency_ms: number;
+  min_latency_ms: number;
+  refusals: number;
+  blocked: number;
+  canary_requests: number;
+  avg_grounding_score: number;
+  avg_feedback_rating: number;
+  feedback_count: number;
+  tenant_id: string;
+  period_hours: number;
+}
+
+interface RecentRequest {
+  request_id: string;
+  tenant_id: string;
+  timestamp: string;
+  user_message: string;
+  model_type: string;
+  latency_ms: number;
+  was_refused: number;
+  grounding_score: number | null;
+}
+
+interface ModelStats {
+  base_loaded: boolean;
+  active_adapter: string | null;
+  available_adapters: string[];
+  load_count: number;
+  generation_count: number;
+  gpu_memory: Record<string, any>;
+}
+
+const API_BASE = '/api';
+
+export default function MonitoringPanel({ tenantId }: { tenantId: string }) {
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [allStats, setAllStats] = useState<Stats | null>(null);
+  const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([]);
+  const [modelStats, setModelStats] = useState<ModelStats | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [statsRes, allStatsRes, recentRes, modelRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/stats?tenant_id=${tenantId}&hours=24`),
+        fetch(`${API_BASE}/stats?hours=24`),
+        fetch(`${API_BASE}/stats/recent?tenant_id=${tenantId}&limit=15`),
+        fetch(`${API_BASE}/model/stats`),
+      ]);
+
+      if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
+        setStats(await statsRes.value.json());
+      }
+      if (allStatsRes.status === 'fulfilled' && allStatsRes.value.ok) {
+        setAllStats(await allStatsRes.value.json());
+      }
+      if (recentRes.status === 'fulfilled' && recentRes.value.ok) {
+        setRecentRequests(await recentRes.value.json());
+      }
+      if (modelRes.status === 'fulfilled' && modelRes.value.ok) {
+        setModelStats(await modelRes.value.json());
+      }
+      setError(null);
+    } catch (e: any) {
+      setError(`Connection error: ${e.message}`);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    fetchData();
+    if (autoRefresh) {
+      const interval = setInterval(fetchData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [fetchData, autoRefresh]);
+
+  const StatCard = ({
+    label,
+    value,
+    unit,
+    color,
+  }: {
+    label: string;
+    value: string | number;
+    unit?: string;
+    color?: string;
+  }) => (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+      <p className={`text-2xl font-bold mt-1 ${color || 'text-gray-800'}`}>
+        {value}
+        {unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="h-full overflow-y-auto p-6 bg-gray-50">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">
+            📊 Monitoring Dashboard
+          </h2>
+          <p className="text-sm text-gray-500">
+            Tenant: {tenantId.toUpperCase()} | Last 24 hours
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-sm text-gray-500">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="rounded"
+            />
+            Auto-refresh
+          </label>
+          <button
+            onClick={fetchData}
+            className="px-3 py-1.5 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard
+          label="Total Requests"
+          value={stats?.total_requests || 0}
+        />
+        <StatCard
+          label="Avg Latency"
+          value={Math.round(stats?.avg_latency_ms || 0)}
+          unit="ms"
+          color={
+            (stats?.avg_latency_ms || 0) > 5000
+              ? 'text-red-600'
+              : (stats?.avg_latency_ms || 0) > 2000
+              ? 'text-yellow-600'
+              : 'text-green-600'
+          }
+        />
+        <StatCard
+          label="Avg Grounding"
+          value={
+            stats?.avg_grounding_score
+              ? `${(stats.avg_grounding_score * 100).toFixed(0)}%`
+              : 'N/A'
+          }
+          color={
+            (stats?.avg_grounding_score || 0) > 0.7
+              ? 'text-green-600'
+              : 'text-yellow-600'
+          }
+        />
+        <StatCard
+          label="Feedback Rating"
+          value={stats?.avg_feedback_rating?.toFixed(1) || 'N/A'}
+          unit={stats?.feedback_count ? `(${stats.feedback_count})` : ''}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard
+          label="Refusals"
+          value={stats?.refusals || 0}
+        />
+        <StatCard
+          label="Blocked"
+          value={stats?.blocked || 0}
+        />
+        <StatCard
+          label="Canary Requests"
+          value={stats?.canary_requests || 0}
+        />
+        <StatCard
+          label="Max Latency"
+          value={Math.round(stats?.max_latency_ms || 0)}
+          unit="ms"
+        />
+      </div>
+
+      {/* Model Info */}
+      {modelStats && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">🔧 Model Status</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500">Base Model</p>
+              <p className="font-medium flex items-center gap-1">
+                {modelStats.base_loaded ? (
+                  <><span className="w-2 h-2 bg-green-400 rounded-full"></span> Loaded</>
+                ) : (
+                  <><span className="w-2 h-2 bg-gray-400 rounded-full"></span> Not loaded</>
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500">Active Adapter</p>
+              <p className="font-medium">{modelStats.active_adapter || 'None'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Total Generations</p>
+              <p className="font-medium">{modelStats.generation_count}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">GPU Memory</p>
+              <p className="font-medium">
+                {modelStats.gpu_memory?.allocated_gb
+                  ? `${modelStats.gpu_memory.allocated_gb} GB`
+                  : 'N/A'}
+              </p>
+            </div>
+          </div>
+          {modelStats.available_adapters.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs text-gray-500 mb-1">Available Adapters:</p>
+              <div className="flex gap-1 flex-wrap">
+                {modelStats.available_adapters.map((a) => (
+                  <span
+                    key={a}
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      a === modelStats.active_adapter
+                        ? 'bg-blue-100 text-blue-700 font-medium'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    {a}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recent Requests */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          📋 Recent Requests ({tenantId.toUpperCase()})
+        </h3>
+        {recentRequests.length === 0 ? (
+          <p className="text-sm text-gray-400 py-4 text-center">No requests yet</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-2 px-2 text-gray-500 font-medium">Time</th>
+                  <th className="text-left py-2 px-2 text-gray-500 font-medium">Message</th>
+                  <th className="text-left py-2 px-2 text-gray-500 font-medium">Model</th>
+                  <th className="text-right py-2 px-2 text-gray-500 font-medium">Latency</th>
+                  <th className="text-center py-2 px-2 text-gray-500 font-medium">Grounding</th>
+                  <th className="text-center py-2 px-2 text-gray-500 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentRequests.map((req) => (
+                  <tr key={req.request_id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 px-2 text-gray-400 text-xs whitespace-nowrap">
+                      {new Date(req.timestamp).toLocaleTimeString()}
+                    </td>
+                    <td className="py-2 px-2 text-gray-700 max-w-[200px] truncate">
+                      {req.user_message}
+                    </td>
+                    <td className="py-2 px-2">
+                      <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                        {req.model_type || 'base'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-2 text-right text-gray-600">
+                      {Math.round(req.latency_ms)}ms
+                    </td>
+                    <td className="py-2 px-2 text-center">
+                      {req.grounding_score !== null ? (
+                        <span
+                          className={`text-xs font-medium ${
+                            req.grounding_score > 0.7
+                              ? 'text-green-600'
+                              : req.grounding_score > 0.4
+                              ? 'text-yellow-600'
+                              : 'text-red-600'
+                          }`}
+                        >
+                          {(req.grounding_score * 100).toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-center">
+                      {req.was_refused ? (
+                        <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">
+                          refused
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                          ok
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## How to run this series
+
+```bash
+# Navigate to web app directory
+cd web_app
+
+# Install dependencies
+npm install
+
+# Start development server (requires inference API on port 8000)
+npm run dev
+```
+
+Then open `http://localhost:3000` in your browser.
+
+### Prerequisites
+- Inference server running on port 8000: `uvicorn inference.main:app --host 0.0.0.0 --port 8000`
+- RAG indexes built: `python rag/build_index.py`
+- Data pipeline completed: `python -m tenant_data_pipeline.run_pipeline`
+
+### What the UI looks like
+
+```
+┌──────────────────────┬─────────────────────────────────────────────────────┐
+│ 🤖 LLM Platform     │ 🏫 SIS Assistant  [SIS]     [Chat] [Monitor] [Compare] │
+│ Multi-Tenant POC     │─────────────────────────────────────────────────────│
+│                      │                                                     │
+│ ── Tenant ──         │                    🏫                               │
+│ [🏫 SIS] [🏭 MFG]   │              SIS Assistant                          │
+│                      │     Ask about enrollment, attendance...             │
+│ ── Try these ──      │                                                     │
+│ • What documents are │                                                     │
+│   required for...    │                                                     │
+│ • How does FERPA...  │                                                     │
+│ • What happens after │                                                     │
+│   5 unexcused...     │                                                     │
+│ • What is the grade  │                                                     │
+│   change procedure?  │                                                     │
+│ • Who can access...  │      ┌─────────────────────────────────┐            │
+│                      │      │ What documents are needed for   │            │
+│                      │      │ enrollment?                     │            │
+│                      │      └─────────────────────────────────┘            │
+│                      │                                                     │
+│                      │ 🏫  SIS Assistant                                   │
+│                      │ ┌─────────────────────────────────────────────────┐ │
+│                      │ │ For enrollment in District 42, students must    │ │
+│                      │ │ provide proof of residency, immunization        │ │
+│                      │ │ records, and a birth certificate [Enrollment    │ │
+│                      │ │ Policy — enrollment]. Transfer students must... │ │
+│                      │ │                                                 │ │
+│                      │ │ 📚 Sources                                      │ │
+│                      │ │ [1] Enrollment Policy • enrollment     89%      │ │
+│                      │ │ [2] Student Transfer  • transfers      73%      │ │
+│                      │ │                                                 │ │
+│                      │ │ ⏱ 2340ms  🔧 sft  📐 85% grounded  👍 👎      │ │
+│                      │ └─────────────────────────────────────────────────┘ │
+│                      │                                                     │
+│                      │─────────────────────────────────────────────────────│
+│ ● Server connected   │ [✓ RAG] [✓ Stream]                    [Clear chat] │
+│ Qwen2.5-1.5B + LoRA  │ [Ask about student information...              ] [Send]│
+└──────────────────────┴─────────────────────────────────────────────────────┘
+```
+
+### Compare view (side-by-side)
+
+```
+┌─────────────────────────────────┬─────────────────────────────────┐
+│ SIS Tenant                      │ MFG Tenant                      │
+│─────────────────────────────────│─────────────────────────────────│
+│                                 │                                 │
+│ User: What is the enrollment    │ User: What is the enrollment    │
+│       process?                  │       process?                  │
+│                                 │                                 │
+│ 🏫 SIS: Students must provide   │ 🏭 MFG: I don't have            │
+│ proof of residency...           │ information about enrollment.   │
+│ [Enrollment Policy]             │ My expertise covers             │
+│                                 │ manufacturing operations...     │
+│ 📚 3 sources  ⏱ 2100ms         │                                 │
+│                                 │ ⏱ 1800ms                       │
+└─────────────────────────────────┴─────────────────────────────────┘
+```
+
+### Monitoring dashboard view
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📊 Monitoring Dashboard                                             │
+│ Tenant: SIS | Last 24 hours                     [✓ Auto] [Refresh] │
+│─────────────────────────────────────────────────────────────────────│
+│                                                                     │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐               │
+│ │ Total    │ │ Avg      │ │ Avg      │ │ Feedback │               │
+│ │ Requests │ │ Latency  │ │ Grounding│ │ Rating   │               │
+│ │    47    │ │  2340 ms │ │   78%    │ │  4.2 (12)│               │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────┘               │
+│                                                                     │
+│ 🔧 Model Status                                                     │
+│ Base Model: ● Loaded  |  Active: sis_sft  |  Gens: 47  |  GPU: 1.2GB │
+│ Adapters: [sis_sft] [sis_dpo] [mfg_sft]                            │
+│                                                                     │
+│ 📋 Recent Requests (SIS)                                             │
+│ ┌──────┬───────────────────────┬──────┬────────┬──────┬──────┐     │
+│ │ Time │ Message               │Model │Latency │Ground│Status│     │
+│ ├──────┼───────────────────────┼──────┼────────┼──────┼──────┤     │
+│ │14:30 │What docs for enroll...│ sft  │ 2340ms │ 85%  │  ok  │     │
+│ │14:28 │How does FERPA prot...│ sft  │ 1980ms │ 91%  │  ok  │     │
+│ │14:25 │Show me student SSN...│ sft  │  450ms │  —   │refuse│     │
+│ └──────┴───────────────────────┴──────┴────────┴──────┴──────┘     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Key features demonstrated
+
+| Feature | Implementation |
+|---|---|
+| **Tenant selection** | Sidebar buttons + dropdown, auto-clears chat on switch |
+| **Streaming responses** | SSE EventSource with token-by-token rendering + cursor animation |
+| **Non-streaming mode** | Toggle checkbox, single POST/response |
+| **Citations** | Displayed below response with source name, topic, and relevance score |
+| **Grounding score** | Shown in message metadata bar |
+| **Feedback** | 👍/👎 buttons that POST to `/feedback` endpoint |
+| **RAG toggle** | Checkbox to compare RAG vs non-RAG responses |
+| **Side-by-side compare** | Two chat panels showing both tenants simultaneously |
+| **Monitoring dashboard** | Live stats, model status, recent requests table |
+| **Auto-refresh** | Dashboard polls every 5 seconds |
+| **Canary indicator** | Yellow "canary" badge when response comes from canary model |
+| **Sample questions** | Sidebar with clickable domain-specific questions |
+| **Tenant branding** | Blue for SIS, green for MFG throughout UI |
+| **API proxy** | Next.js rewrites proxy `/api/*` to backend on port 8000 |
+
+---
+
+**Next: Series 7 — Mobile App (`mobile_app/`)**
+
+Shall I continue with Series 7?

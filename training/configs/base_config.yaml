@@ -1,0 +1,33 @@
+# Base training configuration
+# Hardware: 8GB VRAM GPU + 30GB RAM
+
+model:
+  base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+  local_path: "./models/base/qwen2.5-1.5b-instruct"
+  max_seq_length: 512
+  torch_dtype: "float16"
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_prefix: "multi-tenant-llm"

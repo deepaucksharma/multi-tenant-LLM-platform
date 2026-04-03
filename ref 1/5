@@ -1,0 +1,363 @@
+# Series 5/6 — Web, Mobile, and Voice Integration
+
+Now we build the application surfaces. The JD specifically requires your models to be integrated into **web, mobile, and voice**.
+
+To fit this into a POC without spending weeks on frontend frameworks, we will build **thin clients** that all talk to your FastAPI backend.
+
+---
+
+# 1. Web UI (Streamlit)
+
+While Next.js is great, **Streamlit** is the industry standard for fast AI Python POCs. It handles streaming, state, and UI in ~100 lines of code.
+
+## `web_app/app.py`
+
+This UI includes:
+- A sidebar to switch between tenants (SIS vs Manufacturing)
+- A chat window
+- Real-time SSE streaming from your FastAPI backend
+- Citation rendering
+
+```python
+# web_app/app.py
+import streamlit as st
+import requests
+import json
+
+API_URL = "http://localhost:8000/v1/chat"
+
+st.set_page_config(page_title="Multi-Tenant AI Copilot", layout="wide")
+
+st.title("🏢 Multi-Tenant Domain Copilot")
+
+# 1. Tenant Selector
+tenant = st.sidebar.selectbox(
+    "Select Tenant Context",
+    ("sis", "mfg"),
+    format_func=lambda x: "🎓 Student Info System (SIS)" if x == "sis" else "⚙️ Manufacturing (MFG)"
+)
+
+# Reset chat if tenant changes
+if "current_tenant" not in st.session_state or st.session_state.current_tenant != tenant:
+    st.session_state.current_tenant = tenant
+    st.session_state.messages = []
+
+# Display chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if "sources" in msg and msg["sources"]:
+            st.caption(f"📚 Sources: {', '.join(msg['sources'])}")
+
+# Chat input
+if prompt := st.chat_input(f"Ask the {tenant.upper()} assistant..."):
+    # Append user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Streaming response
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
+        sources = []
+
+        try:
+            # Call FastAPI streaming endpoint
+            with requests.post(
+                API_URL, 
+                json={"tenant_id": tenant, "query": prompt}, 
+                stream=True
+            ) as r:
+                for line in r.iter_lines():
+                    if line:
+                        decoded_line = line.decode('utf-8')
+                        if decoded_line.startswith("data: "):
+                            data_str = decoded_line[6:]
+                            if data_str == "[DONE]":
+                                break
+                            
+                            data = json.loads(data_str)
+                            if "token" in data:
+                                full_response += data["token"]
+                                message_placeholder.markdown(full_response + "▌")
+                            elif "sources" in data:
+                                sources = data["sources"]
+
+            message_placeholder.markdown(full_response)
+            if sources:
+                st.caption(f"📚 Sources: {', '.join(sources)}")
+            
+            # Save assistant message
+            st.session_state.messages.append({
+                "role": "assistant", 
+                "content": full_response,
+                "sources": sources
+            })
+
+        except Exception as e:
+            st.error(f"Backend connection failed: {e}")
+```
+
+### Run it:
+```bash
+pip install streamlit requests
+streamlit run web_app/app.py
+```
+
+---
+
+# 2. Mobile App (Expo React Native)
+
+You don't need a published app. You just need a single React Native screen proving your API is mobile-ready. 
+
+## Setup
+```bash
+npx create-expo-app mobile_app
+cd mobile_app
+npm install
+```
+
+## `mobile_app/App.js`
+
+Replace the default `App.js` with this. It provides a dropdown, a chat window, and hits your local network API.
+
+*(Note: Replace `YOUR_LOCAL_IP` with your desktop's actual local IP address, e.g., `192.168.1.15`, because the mobile simulator cannot resolve `localhost` to your PC).*
+
+```javascript
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TextInput, Button, ScrollView, SafeAreaView } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
+
+// Replace with your computer's local IP address
+const API_URL = "http://YOUR_LOCAL_IP:8000/v1/chat";
+
+export default function App() {
+  const [tenant, setTenant] = useState('sis');
+  const [query, setQuery] = useState('');
+  const [chat, setChat] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const sendMessage = async () => {
+    if (!query) return;
+    
+    const newChat = [...chat, { role: 'user', text: query }];
+    setChat(newChat);
+    setQuery('');
+    setLoading(true);
+
+    try {
+      // For the POC mobile app, we use standard fetch. 
+      // In production, we'd use react-native-sse for streaming.
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenant, query: query })
+      });
+
+      const textStream = await response.text();
+      
+      // Basic parser to extract the streamed tokens into a single string
+      const lines = textStream.split('\n');
+      let fullText = '';
+      
+      lines.forEach(line => {
+        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+          try {
+            const data = JSON.parse(line.substring(6));
+            if (data.token) fullText += data.token;
+          } catch (e) {}
+        }
+      });
+
+      setChat([...newChat, { role: 'assistant', text: fullText }]);
+    } catch (error) {
+      setChat([...newChat, { role: 'assistant', text: "Error connecting to server." }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.header}>AI Copilot Mobile</Text>
+      
+      <Picker
+        selectedValue={tenant}
+        style={styles.picker}
+        onValueChange={(itemValue) => setTenant(itemValue)}
+      >
+        <Picker.Item label="Student Info System (SIS)" value="sis" />
+        <Picker.Item label="Manufacturing (MFG)" value="mfg" />
+      </Picker>
+
+      <ScrollView style={styles.chatArea}>
+        {chat.map((msg, index) => (
+          <View key={index} style={msg.role === 'user' ? styles.userMsg : styles.botMsg}>
+            <Text style={styles.msgText}>{msg.text}</Text>
+          </View>
+        ))}
+        {loading && <Text style={styles.loading}>Assistant is typing...</Text>}
+      </ScrollView>
+
+      <View style={styles.inputArea}>
+        <TextInput
+          style={styles.input}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Ask a question..."
+        />
+        <Button title="Send" onPress={sendMessage} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  header: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', margin: 10 },
+  picker: { backgroundColor: '#fff', margin: 10 },
+  chatArea: { flex: 1, padding: 10 },
+  userMsg: { alignSelf: 'flex-end', backgroundColor: '#007AFF', padding: 10, borderRadius: 10, marginVertical: 5, maxWidth: '80%' },
+  botMsg: { alignSelf: 'flex-start', backgroundColor: '#E5E5EA', padding: 10, borderRadius: 10, marginVertical: 5, maxWidth: '80%' },
+  msgText: { color: '#000' },
+  loading: { textAlign: 'center', color: '#888', fontStyle: 'italic' },
+  inputArea: { flexDirection: 'row', padding: 10, backgroundColor: '#fff' },
+  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 20, paddingHorizontal: 15, marginRight: 10 }
+});
+```
+
+### Run it:
+```bash
+npm install @react-native-picker/picker
+npm start
+```
+*You can press `w` to run it in a web browser, or scan the QR code with the Expo Go app on your phone.*
+
+---
+
+# 3. Voice Agent (Python Local Script)
+
+The JD emphasizes voice STT -> LLM -> TTS. 
+
+To run this on your desktop without burning GPU memory or paying API fees, use:
+- **STT**: `faster-whisper` (runs perfectly on CPU `tiny.en` model)
+- **TTS**: `pyttsx3` (local offline text-to-speech)
+- **Mic input**: `speech_recognition`
+
+## Setup
+```bash
+pip install faster-whisper SpeechRecognition pyttsx3 pyaudio requests
+```
+*(Note: If PyAudio fails to install on Windows, install it via `pip install pipwin && pipwin install pyaudio` or use WSL).*
+
+## `voice/voice_agent.py`
+
+```python
+# voice/voice_agent.py
+import speech_recognition as sr
+import pyttsx3
+import requests
+import json
+from faster_whisper import WhisperModel
+
+API_URL = "http://localhost:8000/v1/chat"
+TENANT = "sis" # Hardcode or prompt user to select
+
+print("Loading Whisper STT model on CPU (to save VRAM)...")
+whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+
+print("Initializing TTS engine...")
+tts_engine = pyttsx3.init()
+tts_engine.setProperty('rate', 160)
+
+def speak(text):
+    print(f"\n[Agent Speaks]: {text}")
+    tts_engine.say(text)
+    tts_engine.runAndWait()
+
+def chat_with_llm(query):
+    print(f"\n[Thinking...]")
+    full_response = ""
+    try:
+        # Request stream from our FastAPI backend
+        with requests.post(API_URL, json={"tenant_id": TENANT, "query": query}, stream=True) as r:
+            for line in r.iter_lines():
+                if line:
+                    decoded = line.decode('utf-8')
+                    if decoded.startswith("data: ") and not decoded.includes("[DONE]"):
+                        data = json.loads(decoded[6:])
+                        if "token" in data:
+                            full_response += data["token"]
+                            print(data["token"], end="", flush=True)
+    except Exception as e:
+        full_response = "I'm having trouble connecting to the brain."
+    return full_response
+
+def main():
+    recognizer = sr.Recognizer()
+    
+    print(f"\n=== Voice Agent Active ({TENANT.upper()} Mode) ===")
+    print("Press Ctrl+C to exit.\n")
+    
+    speak("Hello. I am your voice assistant. How can I help you today?")
+    
+    while True:
+        with sr.Microphone() as source:
+            print("\n[Listening... Speak now]")
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            audio = recognizer.listen(source)
+            
+            with open("temp.wav", "wb") as f:
+                f.write(audio.get_wav_data())
+                
+        print("[Transcribing...]")
+        segments, info = whisper_model.transcribe("temp.wav", beam_size=1)
+        transcription = " ".join([segment.text for segment in segments]).strip()
+        
+        if not transcription:
+            continue
+            
+        print(f"\n[You]: {transcription}")
+        
+        # Guard word to exit
+        if "goodbye" in transcription.lower() or "exit" in transcription.lower():
+            speak("Goodbye!")
+            break
+            
+        # Get LLM response and speak it
+        response_text = chat_with_llm(transcription)
+        
+        # Clean up response for TTS (remove citations/markdown)
+        clean_text = response_text.split("[Source")[0].replace("*", "").strip()
+        speak(clean_text)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Run it:
+Ensure the FastAPI backend is running on port 8000, then:
+```bash
+python voice/voice_agent.py
+```
+Talk into your mic! It will capture audio, transcribe via Whisper, hit your multi-tenant backend, stream the text to the terminal, and speak the result out loud.
+
+---
+
+# 4. What "Done" looks like for Series 5
+
+You have successfully completed this phase when:
+1. You can open `localhost:8501` (Streamlit) and chat with both tenants.
+2. You can run the Expo app on your phone or web simulator and get answers.
+3. You can run the Python voice script, speak a question like *"How do I request a transcript?"*, and hear the LLM speak the policy-grounded answer back.
+
+### Interview Talking Points
+> "To prove omni-channel integration, I exposed the multi-tenant architecture via a unified FastAPI streaming gateway. I integrated this with a Next.js/Streamlit web client, an Expo React Native mobile client to prove lightweight payload handling, and a full Python-based voice pipeline. For the voice agent, I utilized faster-whisper on the CPU and pyttsx3 locally to ensure STT and TTS processes wouldn't compete with the LLM for GPU memory, simulating a distributed microservice architecture."
+
+---
+
+If you're ready to wrap up the POC, reply **"next"** for **Series 6/6**, which covers:
+- **Evaluation framework** (DeepEval / Ragas mock)
+- **Hallucination & Regression testing**
+- **Metrics Dashboard**
+- **Demo Script & Final Interview Prep**

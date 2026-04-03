@@ -1,0 +1,2361 @@
+
+
+
+# Series 3 of 10: Training Pipeline — SFT + DPO + MLflow (`training/`)
+
+This covers QLoRA supervised fine-tuning, DPO preference alignment, experiment tracking with MLflow, model registry, adapter management, and all training configs. Everything is sized for 8GB VRAM.
+
+---
+
+## File 1: `training/__init__.py`
+
+```python
+"""Training pipeline for multi-tenant domain-adapted LLM fine-tuning."""
+```
+
+---
+
+## File 2: `training/configs/base_config.yaml`
+
+```yaml
+# Base training configuration
+# Hardware: 8GB VRAM GPU + 30GB RAM
+
+model:
+  base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+  local_path: "./models/base/qwen2.5-1.5b-instruct"
+  max_seq_length: 512
+  torch_dtype: "float16"
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_prefix: "multi-tenant-llm"
+```
+
+---
+
+## File 3: `training/configs/sft_sis.yaml`
+
+```yaml
+# SFT config for SIS tenant
+inherits: base_config.yaml
+
+tenant:
+  tenant_id: "sis"
+  domain: "Student Information System / Education"
+
+data:
+  train_path: "./data/sis/sft/train_chat.json"
+  eval_path: "./data/sis/sft/eval_chat.json"
+
+training:
+  output_dir: "./models/adapters/sis/sft"
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  logging_steps: 5
+  eval_strategy: "steps"
+  eval_steps: 20
+  save_strategy: "steps"
+  save_steps: 50
+  save_total_limit: 3
+  fp16: true
+  bf16: false
+  gradient_checkpointing: true
+  optim: "paged_adamw_8bit"
+  max_grad_norm: 1.0
+  seed: 42
+  report_to: "mlflow"
+```
+
+---
+
+## File 4: `training/configs/sft_mfg.yaml`
+
+```yaml
+# SFT config for Manufacturing tenant
+inherits: base_config.yaml
+
+tenant:
+  tenant_id: "mfg"
+  domain: "Manufacturing / Industrial Quality Control"
+
+data:
+  train_path: "./data/mfg/sft/train_chat.json"
+  eval_path: "./data/mfg/sft/eval_chat.json"
+
+training:
+  output_dir: "./models/adapters/mfg/sft"
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  logging_steps: 5
+  eval_strategy: "steps"
+  eval_steps: 20
+  save_strategy: "steps"
+  save_steps: 50
+  save_total_limit: 3
+  fp16: true
+  bf16: false
+  gradient_checkpointing: true
+  optim: "paged_adamw_8bit"
+  max_grad_norm: 1.0
+  seed: 42
+  report_to: "mlflow"
+```
+
+---
+
+## File 5: `training/configs/dpo_config.yaml`
+
+```yaml
+# DPO config — shared structure, tenant specified at runtime
+inherits: base_config.yaml
+
+dpo:
+  beta: 0.1
+  loss_type: "sigmoid"
+  max_prompt_length: 256
+  max_length: 512
+
+training:
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  logging_steps: 2
+  eval_strategy: "steps"
+  eval_steps: 10
+  save_strategy: "epoch"
+  save_total_limit: 2
+  fp16: true
+  bf16: false
+  gradient_checkpointing: true
+  optim: "paged_adamw_8bit"
+  max_grad_norm: 1.0
+  seed: 42
+  report_to: "mlflow"
+```
+
+---
+
+## File 6: `training/config_loader.py`
+
+```python
+"""
+Load and merge YAML training configs.
+Supports inheritance via 'inherits' key.
+"""
+import yaml
+from pathlib import Path
+from typing import Dict, Any
+
+from loguru import logger
+
+CONFIGS_DIR = Path(__file__).parent / "configs"
+
+
+def deep_merge(base: Dict, override: Dict) -> Dict:
+    """Deep merge two dicts. Override values take precedence."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_config(config_name: str) -> Dict[str, Any]:
+    """
+    Load a YAML config, resolving inheritance.
+
+    Args:
+        config_name: Name of the config file (e.g., 'sft_sis.yaml')
+
+    Returns:
+        Merged configuration dict
+    """
+    config_path = CONFIGS_DIR / config_name
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config not found: {config_path}")
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    # Handle inheritance
+    if "inherits" in config:
+        parent_name = config.pop("inherits")
+        parent_config = load_config(parent_name)
+        config = deep_merge(parent_config, config)
+
+    return config
+
+
+def get_sft_config(tenant_id: str) -> Dict[str, Any]:
+    """Get SFT config for a specific tenant."""
+    return load_config(f"sft_{tenant_id}.yaml")
+
+
+def get_dpo_config() -> Dict[str, Any]:
+    """Get DPO config."""
+    return load_config("dpo_config.yaml")
+
+
+if __name__ == "__main__":
+    import json
+
+    for name in ["sft_sis.yaml", "sft_mfg.yaml", "dpo_config.yaml"]:
+        config = load_config(name)
+        print(f"\n{'='*50}")
+        print(f"Config: {name}")
+        print(json.dumps(config, indent=2, default=str))
+```
+
+---
+
+## File 7: `training/model_loader.py`
+
+```python
+"""
+Model and tokenizer loading utilities.
+Handles 4-bit quantization, LoRA setup, and adapter management.
+All sized for 8GB VRAM.
+"""
+import os
+import torch
+from pathlib import Path
+from typing import Optional, Tuple, Dict, Any
+
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def load_base_model_and_tokenizer(
+    config: Dict[str, Any],
+    for_training: bool = True,
+) -> Tuple:
+    """
+    Load the base model with 4-bit quantization and tokenizer.
+
+    Args:
+        config: Training config dict
+        for_training: If True, prepares model for training (gradient checkpointing etc.)
+
+    Returns:
+        (model, tokenizer)
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    model_cfg = config["model"]
+    quant_cfg = config["quantization"]
+
+    model_path = model_cfg.get("local_path", model_cfg["base_model"])
+    if not Path(model_path).exists():
+        model_path = model_cfg["base_model"]
+        logger.info(f"Local model not found, using HF hub: {model_path}")
+
+    logger.info(f"Loading model: {model_path}")
+
+    # Quantization config for 4-bit
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=quant_cfg.get("load_in_4bit", True),
+        bnb_4bit_compute_dtype=getattr(torch, quant_cfg.get("bnb_4bit_compute_dtype", "float16")),
+        bnb_4bit_quant_type=quant_cfg.get("bnb_4bit_quant_type", "nf4"),
+        bnb_4bit_use_double_quant=quant_cfg.get("bnb_4bit_use_double_quant", True),
+    )
+
+    # Determine dtype
+    dtype_str = model_cfg.get("torch_dtype", "float16")
+    torch_dtype = getattr(torch, dtype_str)
+
+    # Load model
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch_dtype,
+        trust_remote_code=True,
+        token=os.getenv("HF_TOKEN"),
+        attn_implementation="eager",  # safer for small GPUs
+    )
+
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        token=os.getenv("HF_TOKEN"),
+    )
+
+    # Set padding token if not set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    # Ensure left padding for generation, right padding for training
+    if for_training:
+        tokenizer.padding_side = "right"
+    else:
+        tokenizer.padding_side = "left"
+
+    if for_training:
+        model.config.use_cache = False
+        if hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
+
+    param_count = sum(p.numel() for p in model.parameters())
+    trainable_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(
+        f"Model loaded: {param_count/1e6:.1f}M params, "
+        f"{trainable_count/1e6:.1f}M trainable"
+    )
+
+    return model, tokenizer
+
+
+def setup_lora(model, config: Dict[str, Any]):
+    """
+    Apply LoRA adapters to the model.
+
+    Args:
+        model: The base model
+        config: Training config dict containing 'lora' section
+
+    Returns:
+        Model with LoRA adapters applied
+    """
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+    lora_cfg = config["lora"]
+
+    # Prepare model for k-bit training
+    model = prepare_model_for_kbit_training(
+        model,
+        use_gradient_checkpointing=True,
+    )
+
+    # LoRA config
+    peft_config = LoraConfig(
+        r=lora_cfg.get("r", 16),
+        lora_alpha=lora_cfg.get("lora_alpha", 32),
+        lora_dropout=lora_cfg.get("lora_dropout", 0.05),
+        target_modules=lora_cfg.get("target_modules", ["q_proj", "v_proj"]),
+        bias=lora_cfg.get("bias", "none"),
+        task_type=TaskType.CAUSAL_LM,
+    )
+
+    # Apply LoRA
+    model = get_peft_model(model, peft_config)
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    logger.info(
+        f"LoRA applied: {trainable_params/1e6:.2f}M trainable / "
+        f"{total_params/1e6:.1f}M total "
+        f"({100*trainable_params/total_params:.2f}%)"
+    )
+
+    model.print_trainable_parameters()
+
+    return model, peft_config
+
+
+def load_adapter(
+    base_model,
+    adapter_path: str,
+    adapter_name: str = "default",
+):
+    """
+    Load a pre-trained LoRA adapter onto the base model.
+
+    Args:
+        base_model: The base model
+        adapter_path: Path to the adapter directory
+        adapter_name: Name for the adapter
+
+    Returns:
+        Model with adapter loaded
+    """
+    from peft import PeftModel
+
+    logger.info(f"Loading adapter from: {adapter_path}")
+
+    model = PeftModel.from_pretrained(
+        base_model,
+        adapter_path,
+        adapter_name=adapter_name,
+        is_trainable=False,
+    )
+
+    logger.info(f"Adapter '{adapter_name}' loaded successfully")
+    return model
+
+
+def get_gpu_memory_info() -> Dict[str, float]:
+    """Get current GPU memory usage."""
+    if not torch.cuda.is_available():
+        return {"available": False}
+
+    allocated = torch.cuda.memory_allocated() / 1024**3
+    reserved = torch.cuda.memory_reserved() / 1024**3
+    total = torch.cuda.get_device_properties(0).total_mem / 1024**3
+
+    return {
+        "available": True,
+        "device": torch.cuda.get_device_name(0),
+        "total_gb": round(total, 2),
+        "allocated_gb": round(allocated, 2),
+        "reserved_gb": round(reserved, 2),
+        "free_gb": round(total - allocated, 2),
+    }
+
+
+if __name__ == "__main__":
+    from training.config_loader import load_config
+
+    gpu_info = get_gpu_memory_info()
+    print(f"GPU Info: {gpu_info}")
+
+    config = load_config("sft_sis.yaml")
+    model, tokenizer = load_base_model_and_tokenizer(config)
+    model, peft_config = setup_lora(model, config)
+
+    gpu_info = get_gpu_memory_info()
+    print(f"After loading: {gpu_info}")
+```
+
+---
+
+## File 8: `training/data_loader.py`
+
+```python
+"""
+Dataset loading and formatting for SFT and DPO training.
+Handles conversion from JSON to HuggingFace Datasets with proper tokenization.
+"""
+import json
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Callable
+
+from datasets import Dataset
+from loguru import logger
+
+
+def load_sft_dataset(
+    train_path: str,
+    eval_path: str,
+    tokenizer=None,
+    max_seq_length: int = 512,
+) -> tuple:
+    """
+    Load SFT dataset in chat format.
+
+    Args:
+        train_path: Path to training JSON
+        eval_path: Path to evaluation JSON
+        tokenizer: Tokenizer for formatting
+        max_seq_length: Maximum sequence length
+
+    Returns:
+        (train_dataset, eval_dataset)
+    """
+    train_data = _load_json(train_path)
+    eval_data = _load_json(eval_path)
+
+    logger.info(f"Loaded SFT data: {len(train_data)} train, {len(eval_data)} eval")
+
+    # Convert to HuggingFace Dataset
+    train_dataset = Dataset.from_list(train_data)
+    eval_dataset = Dataset.from_list(eval_data)
+
+    # If tokenizer provided, apply chat template
+    if tokenizer is not None:
+        def format_chat(example):
+            """Apply chat template to messages."""
+            messages = example["messages"]
+            try:
+                text = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                )
+            except Exception:
+                # Fallback: manual formatting
+                text = _manual_chat_format(messages)
+            return {"text": text}
+
+        train_dataset = train_dataset.map(format_chat, remove_columns=train_dataset.column_names)
+        eval_dataset = eval_dataset.map(format_chat, remove_columns=eval_dataset.column_names)
+
+    logger.info(f"SFT datasets ready: train={len(train_dataset)}, eval={len(eval_dataset)}")
+    return train_dataset, eval_dataset
+
+
+def load_dpo_dataset(
+    train_path: str,
+    eval_path: str,
+    tokenizer=None,
+) -> tuple:
+    """
+    Load DPO preference dataset.
+
+    Args:
+        train_path: Path to training JSON (TRL format)
+        eval_path: Path to evaluation JSON (TRL format)
+        tokenizer: Tokenizer for formatting
+
+    Returns:
+        (train_dataset, eval_dataset)
+    """
+    train_data = _load_json(train_path)
+    eval_data = _load_json(eval_path)
+
+    logger.info(f"Loaded DPO data: {len(train_data)} train, {len(eval_data)} eval")
+
+    # Format for TRL DPOTrainer
+    def format_dpo(examples: List[Dict]) -> Dict:
+        formatted = {
+            "prompt": [],
+            "chosen": [],
+            "rejected": [],
+        }
+
+        for ex in examples:
+            # Build prompt string
+            if isinstance(ex.get("prompt"), list):
+                # Messages format
+                prompt_msgs = ex["prompt"]
+                chosen_msgs = ex["chosen"]
+                rejected_msgs = ex["rejected"]
+
+                if tokenizer is not None:
+                    try:
+                        prompt_text = tokenizer.apply_chat_template(
+                            prompt_msgs, tokenize=False, add_generation_prompt=True
+                        )
+                        # For chosen/rejected, we need just the assistant response
+                        chosen_text = chosen_msgs[-1]["content"] if chosen_msgs else ""
+                        rejected_text = rejected_msgs[-1]["content"] if rejected_msgs else ""
+                    except Exception:
+                        prompt_text = _manual_chat_format(prompt_msgs, add_generation_prompt=True)
+                        chosen_text = chosen_msgs[-1]["content"] if chosen_msgs else ""
+                        rejected_text = rejected_msgs[-1]["content"] if rejected_msgs else ""
+                else:
+                    prompt_text = _manual_chat_format(prompt_msgs, add_generation_prompt=True)
+                    chosen_text = chosen_msgs[-1]["content"] if chosen_msgs else ""
+                    rejected_text = rejected_msgs[-1]["content"] if rejected_msgs else ""
+            else:
+                # Simple string format
+                prompt_text = ex.get("prompt", "")
+                chosen_text = ex.get("chosen", "")
+                rejected_text = ex.get("rejected", "")
+
+            formatted["prompt"].append(prompt_text)
+            formatted["chosen"].append(chosen_text)
+            formatted["rejected"].append(rejected_text)
+
+        return formatted
+
+    formatted_train = format_dpo(train_data)
+    formatted_eval = format_dpo(eval_data)
+
+    train_dataset = Dataset.from_dict(formatted_train)
+    eval_dataset = Dataset.from_dict(formatted_eval)
+
+    logger.info(f"DPO datasets ready: train={len(train_dataset)}, eval={len(eval_dataset)}")
+    return train_dataset, eval_dataset
+
+
+def _load_json(path: str) -> List[Dict]:
+    """Load JSON file."""
+    filepath = Path(path)
+    if not filepath.exists():
+        raise FileNotFoundError(f"Data file not found: {filepath}")
+
+    with open(filepath) as f:
+        data = json.load(f)
+
+    return data
+
+
+def _manual_chat_format(
+    messages: List[Dict],
+    add_generation_prompt: bool = False,
+) -> str:
+    """Fallback chat formatting when tokenizer template is unavailable."""
+    parts = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            parts.append(f"<|system|>\n{content}")
+        elif role == "user":
+            parts.append(f"<|user|>\n{content}")
+        elif role == "assistant":
+            parts.append(f"<|assistant|>\n{content}")
+
+    text = "\n".join(parts)
+    if add_generation_prompt:
+        text += "\n<|assistant|>\n"
+
+    return text
+
+
+if __name__ == "__main__":
+    # Test loading
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct")
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Test SFT
+    try:
+        train_ds, eval_ds = load_sft_dataset(
+            "./data/sis/sft/train_chat.json",
+            "./data/sis/sft/eval_chat.json",
+            tokenizer=tokenizer,
+        )
+        print(f"SFT train sample:\n{train_ds[0]['text'][:300]}...")
+    except FileNotFoundError as e:
+        print(f"SFT data not found: {e}")
+
+    # Test DPO
+    try:
+        train_ds, eval_ds = load_dpo_dataset(
+            "./data/sis/dpo/train_trl.json",
+            "./data/sis/dpo/eval_trl.json",
+            tokenizer=tokenizer,
+        )
+        print(f"\nDPO train sample:")
+        print(f"  Prompt: {train_ds[0]['prompt'][:200]}...")
+        print(f"  Chosen: {train_ds[0]['chosen'][:150]}...")
+        print(f"  Rejected: {train_ds[0]['rejected'][:150]}...")
+    except FileNotFoundError as e:
+        print(f"DPO data not found: {e}")
+```
+
+---
+
+## File 9: `training/mlflow_utils.py`
+
+```python
+"""
+MLflow experiment tracking and model registry utilities.
+Provides structured tracking for multi-tenant training runs.
+"""
+import os
+import json
+import time
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# MLflow import with graceful fallback
+try:
+    import mlflow
+    import mlflow.pyfunc
+    from mlflow.tracking import MlflowClient
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    logger.warning("MLflow not available. Tracking will use local JSON fallback.")
+
+
+class ExperimentTracker:
+    """
+    Unified experiment tracking that uses MLflow when available,
+    falls back to local JSON logging otherwise.
+    """
+
+    def __init__(
+        self,
+        experiment_name: str = "multi-tenant-llm",
+        tracking_uri: Optional[str] = None,
+    ):
+        self.experiment_name = experiment_name
+        self.tracking_uri = tracking_uri or os.getenv(
+            "MLFLOW_TRACKING_URI", "http://localhost:5000"
+        )
+        self._run_id: Optional[str] = None
+        self._run_data: Dict[str, Any] = {}
+        self._local_log_dir = Path("mlruns/local_logs")
+        self._local_log_dir.mkdir(parents=True, exist_ok=True)
+        self._use_mlflow = False
+
+        if MLFLOW_AVAILABLE:
+            try:
+                mlflow.set_tracking_uri(self.tracking_uri)
+                mlflow.set_experiment(self.experiment_name)
+                self._use_mlflow = True
+                logger.info(f"MLflow tracking at: {self.tracking_uri}")
+            except Exception as e:
+                logger.warning(f"MLflow connection failed: {e}. Using local fallback.")
+                self._use_mlflow = False
+
+    def start_run(
+        self,
+        run_name: str,
+        tags: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Start a new tracking run."""
+        self._run_data = {
+            "run_name": run_name,
+            "started_at": datetime.utcnow().isoformat(),
+            "tags": tags or {},
+            "params": {},
+            "metrics": {},
+            "artifacts": [],
+        }
+
+        if self._use_mlflow:
+            try:
+                run = mlflow.start_run(run_name=run_name, tags=tags)
+                self._run_id = run.info.run_id
+                logger.info(f"MLflow run started: {self._run_id}")
+                return self._run_id
+            except Exception as e:
+                logger.warning(f"MLflow start_run failed: {e}")
+                self._use_mlflow = False
+
+        # Local fallback
+        self._run_id = f"local_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{run_name}"
+        logger.info(f"Local run started: {self._run_id}")
+        return self._run_id
+
+    def log_params(self, params: Dict[str, Any]):
+        """Log parameters."""
+        # Flatten nested dicts
+        flat_params = self._flatten_dict(params)
+
+        self._run_data["params"].update(flat_params)
+
+        if self._use_mlflow:
+            try:
+                # MLflow has a limit on param value length
+                safe_params = {
+                    k: str(v)[:250] for k, v in flat_params.items()
+                }
+                mlflow.log_params(safe_params)
+            except Exception as e:
+                logger.warning(f"MLflow log_params failed: {e}")
+
+    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
+        """Log metrics."""
+        self._run_data["metrics"].update(metrics)
+
+        if self._use_mlflow:
+            try:
+                mlflow.log_metrics(metrics, step=step)
+            except Exception as e:
+                logger.warning(f"MLflow log_metrics failed: {e}")
+
+    def log_metric(self, key: str, value: float, step: Optional[int] = None):
+        """Log a single metric."""
+        self.log_metrics({key: value}, step=step)
+
+    def log_artifact(self, path: str, artifact_path: Optional[str] = None):
+        """Log an artifact file."""
+        self._run_data["artifacts"].append(str(path))
+
+        if self._use_mlflow:
+            try:
+                mlflow.log_artifact(path, artifact_path)
+            except Exception as e:
+                logger.warning(f"MLflow log_artifact failed: {e}")
+
+    def log_model_info(
+        self,
+        tenant_id: str,
+        model_type: str,  # "sft", "dpo", "baseline"
+        base_model: str,
+        adapter_path: Optional[str] = None,
+        metrics: Optional[Dict] = None,
+    ):
+        """Log structured model information for registry."""
+        model_info = {
+            "tenant_id": tenant_id,
+            "model_type": model_type,
+            "base_model": base_model,
+            "adapter_path": adapter_path,
+            "metrics": metrics or {},
+            "registered_at": datetime.utcnow().isoformat(),
+        }
+
+        self._run_data["model_info"] = model_info
+
+        if self._use_mlflow:
+            try:
+                mlflow.log_params({
+                    "tenant_id": tenant_id,
+                    "model_type": model_type,
+                    "base_model": base_model,
+                })
+                if adapter_path:
+                    mlflow.log_param("adapter_path", adapter_path)
+            except Exception:
+                pass
+
+    def end_run(self, status: str = "FINISHED"):
+        """End the current run."""
+        self._run_data["ended_at"] = datetime.utcnow().isoformat()
+        self._run_data["status"] = status
+
+        # Always save local log
+        log_path = self._local_log_dir / f"{self._run_id}.json"
+        log_path.write_text(json.dumps(self._run_data, indent=2, default=str))
+
+        if self._use_mlflow:
+            try:
+                mlflow.end_run(status=status)
+            except Exception as e:
+                logger.warning(f"MLflow end_run failed: {e}")
+
+        logger.info(f"Run ended: {self._run_id} [{status}]")
+
+    def _flatten_dict(self, d: Dict, parent_key: str = "", sep: str = ".") -> Dict:
+        """Flatten nested dict for MLflow params."""
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
+            elif isinstance(v, (list, tuple)):
+                items.append((new_key, str(v)))
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+
+class ModelRegistry:
+    """
+    Simple model registry that tracks adapter versions per tenant.
+    Uses MLflow Model Registry when available, local JSON otherwise.
+    """
+
+    def __init__(self):
+        self.registry_path = Path("models/registry.json")
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        self._load_registry()
+
+    def _load_registry(self):
+        """Load existing registry."""
+        if self.registry_path.exists():
+            with open(self.registry_path) as f:
+                self.registry = json.load(f)
+        else:
+            self.registry = {"models": [], "active_versions": {}}
+
+    def _save_registry(self):
+        """Save registry to disk."""
+        self.registry_path.write_text(
+            json.dumps(self.registry, indent=2, default=str)
+        )
+
+    def register_model(
+        self,
+        tenant_id: str,
+        model_type: str,
+        version: str,
+        adapter_path: str,
+        base_model: str,
+        metrics: Optional[Dict] = None,
+        training_config: Optional[Dict] = None,
+        dataset_info: Optional[Dict] = None,
+        status: str = "staging",
+    ) -> Dict:
+        """
+        Register a new model version.
+
+        Args:
+            tenant_id: Tenant identifier
+            model_type: "sft", "dpo", "baseline"
+            version: Version string (e.g., "v1.0")
+            adapter_path: Path to adapter weights
+            base_model: Base model identifier
+            metrics: Evaluation metrics
+            training_config: Training hyperparameters
+            dataset_info: Dataset metadata
+            status: "staging", "production", "archived"
+
+        Returns:
+            Registration entry
+        """
+        entry = {
+            "id": f"{tenant_id}_{model_type}_{version}",
+            "tenant_id": tenant_id,
+            "model_type": model_type,
+            "version": version,
+            "adapter_path": adapter_path,
+            "base_model": base_model,
+            "metrics": metrics or {},
+            "training_config": training_config or {},
+            "dataset_info": dataset_info or {},
+            "status": status,
+            "registered_at": datetime.utcnow().isoformat(),
+            "promoted_at": None,
+        }
+
+        self.registry["models"].append(entry)
+        self._save_registry()
+
+        logger.info(
+            f"Model registered: {entry['id']} | status={status} | "
+            f"metrics={metrics}"
+        )
+        return entry
+
+    def promote_to_production(self, tenant_id: str, model_type: str, version: str):
+        """Promote a model version to production status."""
+        model_id = f"{tenant_id}_{model_type}_{version}"
+
+        # Demote current production version
+        current_key = f"{tenant_id}_{model_type}"
+        current_prod = self.registry["active_versions"].get(current_key)
+        if current_prod:
+            for m in self.registry["models"]:
+                if m["id"] == current_prod and m["status"] == "production":
+                    m["status"] = "archived"
+
+        # Promote new version
+        for m in self.registry["models"]:
+            if m["id"] == model_id:
+                m["status"] = "production"
+                m["promoted_at"] = datetime.utcnow().isoformat()
+                self.registry["active_versions"][current_key] = model_id
+                break
+
+        self._save_registry()
+        logger.info(f"Model promoted to production: {model_id}")
+
+    def get_production_model(self, tenant_id: str, model_type: str = "sft") -> Optional[Dict]:
+        """Get the current production model for a tenant."""
+        current_key = f"{tenant_id}_{model_type}"
+        model_id = self.registry["active_versions"].get(current_key)
+
+        if model_id:
+            for m in self.registry["models"]:
+                if m["id"] == model_id:
+                    return m
+
+        # Fallback: get latest staging model
+        tenant_models = [
+            m for m in self.registry["models"]
+            if m["tenant_id"] == tenant_id and m["model_type"] == model_type
+        ]
+        if tenant_models:
+            return tenant_models[-1]
+
+        return None
+
+    def list_models(self, tenant_id: Optional[str] = None) -> List[Dict]:
+        """List registered models, optionally filtered by tenant."""
+        models = self.registry["models"]
+        if tenant_id:
+            models = [m for m in models if m["tenant_id"] == tenant_id]
+        return models
+
+    def get_summary(self) -> Dict:
+        """Get registry summary."""
+        return {
+            "total_models": len(self.registry["models"]),
+            "active_versions": self.registry["active_versions"],
+            "by_tenant": {
+                tid: len([m for m in self.registry["models"] if m["tenant_id"] == tid])
+                for tid in set(m["tenant_id"] for m in self.registry["models"])
+            } if self.registry["models"] else {},
+        }
+
+
+if __name__ == "__main__":
+    # Test tracker
+    tracker = ExperimentTracker()
+    run_id = tracker.start_run("test_run", tags={"tenant": "sis", "type": "test"})
+    tracker.log_params({"lr": 2e-4, "epochs": 3, "lora_r": 16})
+    tracker.log_metrics({"train_loss": 0.5, "eval_loss": 0.6})
+    tracker.end_run()
+
+    # Test registry
+    registry = ModelRegistry()
+    registry.register_model(
+        tenant_id="sis",
+        model_type="sft",
+        version="v0.1",
+        adapter_path="models/adapters/sis/sft",
+        base_model="Qwen/Qwen2.5-1.5B-Instruct",
+        metrics={"eval_loss": 0.5},
+    )
+    print(f"Registry summary: {registry.get_summary()}")
+```
+
+---
+
+## File 10: `training/sft_train.py`
+
+```python
+"""
+Supervised Fine-Tuning (SFT) training script.
+Uses QLoRA on Qwen2.5-1.5B-Instruct for tenant-specific domain adaptation.
+
+Usage:
+    python training/sft_train.py --tenant sis
+    python training/sft_train.py --tenant mfg
+"""
+import os
+import sys
+import time
+import json
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+import torch
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from training.config_loader import get_sft_config
+from training.model_loader import (
+    load_base_model_and_tokenizer,
+    setup_lora,
+    get_gpu_memory_info,
+)
+from training.data_loader import load_sft_dataset
+from training.mlflow_utils import ExperimentTracker, ModelRegistry
+
+
+def train_sft(tenant_id: str, config_override: dict = None):
+    """
+    Run SFT training for a specific tenant.
+
+    Args:
+        tenant_id: "sis" or "mfg"
+        config_override: Optional config overrides
+    """
+    logger.info(f"\n{'='*70}")
+    logger.info(f"SFT TRAINING — TENANT: {tenant_id.upper()}")
+    logger.info(f"{'='*70}")
+
+    # Load config
+    config = get_sft_config(tenant_id)
+    if config_override:
+        config.update(config_override)
+
+    train_cfg = config["training"]
+    model_cfg = config["model"]
+    tenant_cfg = config["tenant"]
+
+    # Initialize tracking
+    tracker = ExperimentTracker(
+        experiment_name=f"sft-{tenant_id}",
+    )
+    run_name = f"sft_{tenant_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    tracker.start_run(
+        run_name=run_name,
+        tags={
+            "tenant_id": tenant_id,
+            "domain": tenant_cfg["domain"],
+            "model_type": "sft",
+            "base_model": model_cfg["base_model"],
+        },
+    )
+
+    try:
+        # Log GPU info
+        gpu_info = get_gpu_memory_info()
+        logger.info(f"GPU: {gpu_info}")
+        tracker.log_params({"gpu": gpu_info})
+
+        # ---- Load model and tokenizer ----
+        logger.info("Loading model and tokenizer...")
+        model, tokenizer = load_base_model_and_tokenizer(config, for_training=True)
+
+        # ---- Apply LoRA ----
+        logger.info("Applying LoRA adapters...")
+        model, peft_config = setup_lora(model, config)
+
+        # Log config
+        tracker.log_params({
+            "base_model": model_cfg["base_model"],
+            "max_seq_length": model_cfg["max_seq_length"],
+            "lora_r": config["lora"]["r"],
+            "lora_alpha": config["lora"]["lora_alpha"],
+            "lora_dropout": config["lora"]["lora_dropout"],
+            "learning_rate": train_cfg["learning_rate"],
+            "num_epochs": train_cfg["num_train_epochs"],
+            "batch_size": train_cfg["per_device_train_batch_size"],
+            "grad_accum": train_cfg["gradient_accumulation_steps"],
+            "effective_batch_size": (
+                train_cfg["per_device_train_batch_size"]
+                * train_cfg["gradient_accumulation_steps"]
+            ),
+        })
+
+        # ---- Load dataset ----
+        logger.info("Loading SFT dataset...")
+        data_cfg = config["data"]
+        train_dataset, eval_dataset = load_sft_dataset(
+            train_path=data_cfg["train_path"],
+            eval_path=data_cfg["eval_path"],
+            tokenizer=tokenizer,
+            max_seq_length=model_cfg["max_seq_length"],
+        )
+
+        tracker.log_params({
+            "train_samples": len(train_dataset),
+            "eval_samples": len(eval_dataset),
+        })
+        logger.info(f"Dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
+
+        # ---- Configure trainer ----
+        from transformers import TrainingArguments
+        from trl import SFTTrainer
+
+        output_dir = train_cfg["output_dir"]
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            num_train_epochs=train_cfg["num_train_epochs"],
+            per_device_train_batch_size=train_cfg["per_device_train_batch_size"],
+            per_device_eval_batch_size=train_cfg["per_device_eval_batch_size"],
+            gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+            learning_rate=train_cfg["learning_rate"],
+            weight_decay=train_cfg["weight_decay"],
+            warmup_ratio=train_cfg["warmup_ratio"],
+            lr_scheduler_type=train_cfg["lr_scheduler_type"],
+            logging_steps=train_cfg["logging_steps"],
+            eval_strategy=train_cfg.get("eval_strategy", "steps"),
+            eval_steps=train_cfg.get("eval_steps", 20),
+            save_strategy=train_cfg.get("save_strategy", "steps"),
+            save_steps=train_cfg.get("save_steps", 50),
+            save_total_limit=train_cfg.get("save_total_limit", 3),
+            fp16=train_cfg.get("fp16", True),
+            bf16=train_cfg.get("bf16", False),
+            gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+            optim=train_cfg.get("optim", "paged_adamw_8bit"),
+            max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
+            seed=train_cfg.get("seed", 42),
+            report_to="none",  # We handle tracking ourselves
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            remove_unused_columns=False,
+            dataloader_pin_memory=False,  # Save memory
+        )
+
+        # ---- Create trainer ----
+        trainer = SFTTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            tokenizer=tokenizer,
+            max_seq_length=model_cfg["max_seq_length"],
+            dataset_text_field="text",
+            packing=False,
+        )
+
+        # ---- Train ----
+        logger.info("Starting SFT training...")
+        gpu_before = get_gpu_memory_info()
+        logger.info(f"GPU before training: {gpu_before}")
+
+        t_start = time.time()
+        train_result = trainer.train()
+        train_time = round(time.time() - t_start, 2)
+
+        logger.info(f"Training completed in {train_time}s")
+
+        # ---- Log training metrics ----
+        train_metrics = train_result.metrics
+        train_metrics["train_time_sec"] = train_time
+        tracker.log_metrics({
+            "train_loss": train_metrics.get("train_loss", 0),
+            "train_runtime": train_metrics.get("train_runtime", 0),
+            "train_samples_per_second": train_metrics.get("train_samples_per_second", 0),
+            "train_time_sec": train_time,
+        })
+
+        # ---- Evaluate ----
+        logger.info("Running evaluation...")
+        eval_metrics = trainer.evaluate()
+        tracker.log_metrics({
+            "eval_loss": eval_metrics.get("eval_loss", 0),
+            "eval_runtime": eval_metrics.get("eval_runtime", 0),
+        })
+        logger.info(f"Eval loss: {eval_metrics.get('eval_loss', 'N/A')}")
+
+        # ---- Save adapter ----
+        logger.info(f"Saving adapter to {output_dir}...")
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+        # Save training metadata
+        metadata = {
+            "tenant_id": tenant_id,
+            "model_type": "sft",
+            "base_model": model_cfg["base_model"],
+            "adapter_path": output_dir,
+            "train_metrics": train_metrics,
+            "eval_metrics": eval_metrics,
+            "config": {
+                "lora": config["lora"],
+                "training": train_cfg,
+            },
+            "trained_at": datetime.utcnow().isoformat(),
+            "train_time_sec": train_time,
+        }
+        metadata_path = Path(output_dir) / "training_metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
+
+        # ---- Register model ----
+        registry = ModelRegistry()
+        version = f"v{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+        registry.register_model(
+            tenant_id=tenant_id,
+            model_type="sft",
+            version=version,
+            adapter_path=output_dir,
+            base_model=model_cfg["base_model"],
+            metrics={
+                "train_loss": train_metrics.get("train_loss"),
+                "eval_loss": eval_metrics.get("eval_loss"),
+            },
+            training_config=train_cfg,
+            dataset_info={
+                "train_samples": len(train_dataset),
+                "eval_samples": len(eval_dataset),
+            },
+        )
+
+        # Log model info
+        tracker.log_model_info(
+            tenant_id=tenant_id,
+            model_type="sft",
+            base_model=model_cfg["base_model"],
+            adapter_path=output_dir,
+            metrics=eval_metrics,
+        )
+
+        gpu_after = get_gpu_memory_info()
+        logger.info(f"GPU after training: {gpu_after}")
+
+        tracker.end_run(status="FINISHED")
+
+        logger.info(f"\n{'='*70}")
+        logger.info(f"SFT TRAINING COMPLETE — {tenant_id.upper()}")
+        logger.info(f"Adapter saved: {output_dir}")
+        logger.info(f"Train loss: {train_metrics.get('train_loss', 'N/A')}")
+        logger.info(f"Eval loss: {eval_metrics.get('eval_loss', 'N/A')}")
+        logger.info(f"Training time: {train_time}s")
+        logger.info(f"{'='*70}")
+
+        return {
+            "status": "success",
+            "tenant_id": tenant_id,
+            "adapter_path": output_dir,
+            "train_loss": train_metrics.get("train_loss"),
+            "eval_loss": eval_metrics.get("eval_loss"),
+            "train_time_sec": train_time,
+        }
+
+    except Exception as e:
+        logger.error(f"Training failed: {e}")
+        tracker.log_metrics({"error": 1})
+        tracker.end_run(status="FAILED")
+        raise
+    finally:
+        # Clean up GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SFT Training")
+    parser.add_argument(
+        "--tenant", type=str, required=True,
+        choices=["sis", "mfg"],
+        help="Tenant to train for",
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=None,
+        help="Override number of epochs",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=None,
+        help="Override learning rate",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=None,
+        help="Override batch size",
+    )
+    args = parser.parse_args()
+
+    overrides = {}
+    if args.epochs:
+        overrides.setdefault("training", {})["num_train_epochs"] = args.epochs
+    if args.lr:
+        overrides.setdefault("training", {})["learning_rate"] = args.lr
+    if args.batch_size:
+        overrides.setdefault("training", {})["per_device_train_batch_size"] = args.batch_size
+
+    result = train_sft(args.tenant, config_override=overrides if overrides else None)
+    print(f"\nResult: {json.dumps(result, indent=2, default=str)}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## File 11: `training/dpo_train.py`
+
+```python
+"""
+Direct Preference Optimization (DPO) training script.
+Aligns tenant models with domain-specific policies:
+- SIS: FERPA compliance, privacy protection
+- MFG: Safety-first, procedure adherence
+
+Usage:
+    python training/dpo_train.py --tenant sis
+    python training/dpo_train.py --tenant mfg
+    python training/dpo_train.py --tenant sis --sft-adapter ./models/adapters/sis/sft
+"""
+import os
+import sys
+import time
+import json
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+import torch
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from training.config_loader import get_dpo_config, get_sft_config
+from training.model_loader import (
+    load_base_model_and_tokenizer,
+    setup_lora,
+    get_gpu_memory_info,
+)
+from training.data_loader import load_dpo_dataset
+from training.mlflow_utils import ExperimentTracker, ModelRegistry
+
+
+def train_dpo(
+    tenant_id: str,
+    sft_adapter_path: str = None,
+    config_override: dict = None,
+):
+    """
+    Run DPO training for a specific tenant.
+    Starts from the SFT-adapted model if adapter path is provided.
+
+    Args:
+        tenant_id: "sis" or "mfg"
+        sft_adapter_path: Path to SFT adapter to start from
+        config_override: Optional config overrides
+    """
+    logger.info(f"\n{'='*70}")
+    logger.info(f"DPO TRAINING — TENANT: {tenant_id.upper()}")
+    logger.info(f"{'='*70}")
+
+    # Load configs
+    dpo_config = get_dpo_config()
+    sft_config = get_sft_config(tenant_id)
+
+    # Merge base model config from SFT config
+    config = {
+        **sft_config,
+        "dpo": dpo_config.get("dpo", {}),
+        "training": dpo_config.get("training", {}),
+    }
+    if config_override:
+        config.update(config_override)
+
+    train_cfg = config["training"]
+    model_cfg = config["model"]
+    dpo_cfg = config["dpo"]
+
+    # Output directory
+    output_dir = f"./models/adapters/{tenant_id}/dpo"
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Auto-detect SFT adapter if not provided
+    if sft_adapter_path is None:
+        default_sft = f"./models/adapters/{tenant_id}/sft"
+        if Path(default_sft).exists() and (Path(default_sft) / "adapter_config.json").exists():
+            sft_adapter_path = default_sft
+            logger.info(f"Auto-detected SFT adapter: {sft_adapter_path}")
+        else:
+            logger.info("No SFT adapter found. Training DPO from base model.")
+
+    # Initialize tracking
+    tracker = ExperimentTracker(experiment_name=f"dpo-{tenant_id}")
+    run_name = f"dpo_{tenant_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    tracker.start_run(
+        run_name=run_name,
+        tags={
+            "tenant_id": tenant_id,
+            "model_type": "dpo",
+            "base_model": model_cfg["base_model"],
+            "sft_adapter": sft_adapter_path or "none",
+        },
+    )
+
+    try:
+        gpu_info = get_gpu_memory_info()
+        logger.info(f"GPU: {gpu_info}")
+        tracker.log_params({"gpu": gpu_info})
+
+        # ---- Load model ----
+        logger.info("Loading model and tokenizer...")
+        model, tokenizer = load_base_model_and_tokenizer(config, for_training=True)
+
+        # ---- Load SFT adapter if available ----
+        if sft_adapter_path:
+            logger.info(f"Loading SFT adapter from {sft_adapter_path}...")
+            from peft import PeftModel
+            model = PeftModel.from_pretrained(
+                model,
+                sft_adapter_path,
+                is_trainable=True,
+            )
+            # Need to merge and unload for DPO training with new LoRA
+            logger.info("Merging SFT adapter for DPO training...")
+            model = model.merge_and_unload()
+        
+        # ---- Apply fresh LoRA for DPO ----
+        logger.info("Applying LoRA for DPO...")
+        # Use smaller LoRA for DPO (less aggressive changes)
+        dpo_lora_config = config["lora"].copy()
+        dpo_lora_config["r"] = max(8, dpo_lora_config.get("r", 16) // 2)
+        dpo_lora_config["lora_alpha"] = dpo_lora_config["r"] * 2
+        config["lora"] = dpo_lora_config
+
+        model, peft_config = setup_lora(model, config)
+
+        # Log params
+        tracker.log_params({
+            "dpo_beta": dpo_cfg.get("beta", 0.1),
+            "dpo_loss_type": dpo_cfg.get("loss_type", "sigmoid"),
+            "dpo_lora_r": dpo_lora_config["r"],
+            "learning_rate": train_cfg["learning_rate"],
+            "num_epochs": train_cfg["num_train_epochs"],
+            "batch_size": train_cfg["per_device_train_batch_size"],
+            "sft_adapter": sft_adapter_path or "none",
+        })
+
+        # ---- Load DPO dataset ----
+        logger.info("Loading DPO dataset...")
+        dpo_train_path = f"./data/{tenant_id}/dpo/train_trl.json"
+        dpo_eval_path = f"./data/{tenant_id}/dpo/eval_trl.json"
+
+        train_dataset, eval_dataset = load_dpo_dataset(
+            train_path=dpo_train_path,
+            eval_path=dpo_eval_path,
+            tokenizer=tokenizer,
+        )
+
+        tracker.log_params({
+            "train_pairs": len(train_dataset),
+            "eval_pairs": len(eval_dataset),
+        })
+        logger.info(f"DPO dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
+
+        # ---- Load reference model ----
+        logger.info("Loading reference model for DPO...")
+        ref_model, _ = load_base_model_and_tokenizer(config, for_training=False)
+        if sft_adapter_path:
+            from peft import PeftModel
+            ref_model = PeftModel.from_pretrained(
+                ref_model,
+                sft_adapter_path,
+                is_trainable=False,
+            )
+            ref_model = ref_model.merge_and_unload()
+
+        # ---- Configure DPO Trainer ----
+        from transformers import TrainingArguments
+        from trl import DPOTrainer, DPOConfig
+
+        dpo_training_config = DPOConfig(
+            output_dir=output_dir,
+            num_train_epochs=train_cfg["num_train_epochs"],
+            per_device_train_batch_size=train_cfg["per_device_train_batch_size"],
+            per_device_eval_batch_size=train_cfg["per_device_eval_batch_size"],
+            gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+            learning_rate=train_cfg["learning_rate"],
+            weight_decay=train_cfg.get("weight_decay", 0.01),
+            warmup_ratio=train_cfg.get("warmup_ratio", 0.1),
+            lr_scheduler_type=train_cfg.get("lr_scheduler_type", "cosine"),
+            logging_steps=train_cfg.get("logging_steps", 2),
+            eval_strategy=train_cfg.get("eval_strategy", "steps"),
+            eval_steps=train_cfg.get("eval_steps", 10),
+            save_strategy=train_cfg.get("save_strategy", "epoch"),
+            save_total_limit=train_cfg.get("save_total_limit", 2),
+            fp16=train_cfg.get("fp16", True),
+            bf16=train_cfg.get("bf16", False),
+            gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
+            optim=train_cfg.get("optim", "paged_adamw_8bit"),
+            max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
+            seed=train_cfg.get("seed", 42),
+            report_to="none",
+            remove_unused_columns=False,
+            beta=dpo_cfg.get("beta", 0.1),
+            loss_type=dpo_cfg.get("loss_type", "sigmoid"),
+            max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
+            max_length=dpo_cfg.get("max_length", 512),
+        )
+
+        # ---- Create DPO Trainer ----
+        trainer = DPOTrainer(
+            model=model,
+            ref_model=ref_model,
+            args=dpo_training_config,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            tokenizer=tokenizer,
+        )
+
+        # ---- Train ----
+        logger.info("Starting DPO training...")
+        t_start = time.time()
+        train_result = trainer.train()
+        train_time = round(time.time() - t_start, 2)
+
+        logger.info(f"DPO training completed in {train_time}s")
+
+        # ---- Log metrics ----
+        train_metrics = train_result.metrics
+        tracker.log_metrics({
+            "dpo_train_loss": train_metrics.get("train_loss", 0),
+            "dpo_train_time_sec": train_time,
+        })
+
+        # Evaluate
+        eval_metrics = trainer.evaluate()
+        tracker.log_metrics({
+            "dpo_eval_loss": eval_metrics.get("eval_loss", 0),
+        })
+
+        # ---- Save adapter ----
+        logger.info(f"Saving DPO adapter to {output_dir}...")
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+        # Save metadata
+        metadata = {
+            "tenant_id": tenant_id,
+            "model_type": "dpo",
+            "base_model": model_cfg["base_model"],
+            "sft_adapter": sft_adapter_path,
+            "adapter_path": output_dir,
+            "dpo_config": dpo_cfg,
+            "train_metrics": train_metrics,
+            "eval_metrics": eval_metrics,
+            "trained_at": datetime.utcnow().isoformat(),
+            "train_time_sec": train_time,
+        }
+        metadata_path = Path(output_dir) / "training_metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
+
+        # ---- Register model ----
+        registry = ModelRegistry()
+        version = f"v{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+        registry.register_model(
+            tenant_id=tenant_id,
+            model_type="dpo",
+            version=version,
+            adapter_path=output_dir,
+            base_model=model_cfg["base_model"],
+            metrics={
+                "dpo_train_loss": train_metrics.get("train_loss"),
+                "dpo_eval_loss": eval_metrics.get("eval_loss"),
+            },
+            training_config=train_cfg,
+            dataset_info={
+                "train_pairs": len(train_dataset),
+                "eval_pairs": len(eval_dataset),
+            },
+        )
+
+        tracker.end_run(status="FINISHED")
+
+        logger.info(f"\n{'='*70}")
+        logger.info(f"DPO TRAINING COMPLETE — {tenant_id.upper()}")
+        logger.info(f"Adapter saved: {output_dir}")
+        logger.info(f"DPO train loss: {train_metrics.get('train_loss', 'N/A')}")
+        logger.info(f"DPO eval loss: {eval_metrics.get('eval_loss', 'N/A')}")
+        logger.info(f"Training time: {train_time}s")
+        logger.info(f"{'='*70}")
+
+        return {
+            "status": "success",
+            "tenant_id": tenant_id,
+            "adapter_path": output_dir,
+            "train_loss": train_metrics.get("train_loss"),
+            "eval_loss": eval_metrics.get("eval_loss"),
+            "train_time_sec": train_time,
+        }
+
+    except Exception as e:
+        logger.error(f"DPO training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        tracker.end_run(status="FAILED")
+        raise
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="DPO Training")
+    parser.add_argument(
+        "--tenant", type=str, required=True,
+        choices=["sis", "mfg"],
+        help="Tenant to train for",
+    )
+    parser.add_argument(
+        "--sft-adapter", type=str, default=None,
+        help="Path to SFT adapter to start from",
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=None,
+        help="Override number of epochs",
+    )
+    parser.add_argument(
+        "--beta", type=float, default=None,
+        help="Override DPO beta",
+    )
+    args = parser.parse_args()
+
+    overrides = {}
+    if args.epochs:
+        overrides.setdefault("training", {})["num_train_epochs"] = args.epochs
+    if args.beta:
+        overrides.setdefault("dpo", {})["beta"] = args.beta
+
+    result = train_dpo(
+        args.tenant,
+        sft_adapter_path=args.sft_adapter,
+        config_override=overrides if overrides else None,
+    )
+    print(f"\nResult: {json.dumps(result, indent=2, default=str)}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## File 12: `training/dpo_train_simple.py`
+
+```python
+"""
+Simplified DPO training that avoids loading two full models simultaneously.
+Better for 8GB VRAM — loads reference model only when needed,
+or uses implicit reference (no ref model copy).
+
+Usage:
+    python training/dpo_train_simple.py --tenant sis
+    python training/dpo_train_simple.py --tenant mfg
+"""
+import os
+import time
+import json
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+import torch
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from training.config_loader import get_dpo_config, get_sft_config
+from training.model_loader import (
+    load_base_model_and_tokenizer,
+    setup_lora,
+    get_gpu_memory_info,
+)
+from training.data_loader import load_dpo_dataset
+from training.mlflow_utils import ExperimentTracker, ModelRegistry
+
+
+def train_dpo_simple(tenant_id: str):
+    """
+    Simplified DPO: uses model itself as implicit reference via PEFT.
+    TRL's DPOTrainer can use ref_model=None when the model is a PeftModel,
+    in which case it uses the base (frozen) weights as the reference.
+    This halves memory usage.
+    """
+    logger.info(f"\n{'='*70}")
+    logger.info(f"DPO TRAINING (SIMPLE) — TENANT: {tenant_id.upper()}")
+    logger.info(f"{'='*70}")
+
+    # Load configs
+    dpo_config = get_dpo_config()
+    sft_config = get_sft_config(tenant_id)
+    config = {**sft_config, "dpo": dpo_config.get("dpo", {}), "training": dpo_config.get("training", {})}
+    
+    train_cfg = config["training"]
+    model_cfg = config["model"]
+    dpo_cfg = config["dpo"]
+    output_dir = f"./models/adapters/{tenant_id}/dpo"
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Check for SFT adapter
+    sft_adapter_path = f"./models/adapters/{tenant_id}/sft"
+    has_sft = Path(sft_adapter_path).exists() and (Path(sft_adapter_path) / "adapter_config.json").exists()
+
+    # Tracking
+    tracker = ExperimentTracker(experiment_name=f"dpo-simple-{tenant_id}")
+    run_name = f"dpo_simple_{tenant_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    tracker.start_run(run_name=run_name, tags={"tenant_id": tenant_id, "model_type": "dpo_simple"})
+
+    try:
+        gpu_info = get_gpu_memory_info()
+        logger.info(f"GPU: {gpu_info}")
+
+        # ---- Load base model ----
+        logger.info("Loading base model...")
+        model, tokenizer = load_base_model_and_tokenizer(config, for_training=True)
+
+        # ---- If SFT adapter exists, merge it first ----
+        if has_sft:
+            logger.info(f"Merging SFT adapter from {sft_adapter_path}...")
+            from peft import PeftModel
+            model = PeftModel.from_pretrained(model, sft_adapter_path, is_trainable=True)
+            model = model.merge_and_unload()
+            logger.info("SFT adapter merged")
+
+        # ---- Apply fresh LoRA for DPO ----
+        dpo_lora_config = config["lora"].copy()
+        dpo_lora_config["r"] = 8  # Smaller for DPO
+        dpo_lora_config["lora_alpha"] = 16
+        config["lora"] = dpo_lora_config
+
+        model, peft_config = setup_lora(model, config)
+
+        tracker.log_params({
+            "dpo_beta": dpo_cfg.get("beta", 0.1),
+            "dpo_lora_r": 8,
+            "has_sft_base": has_sft,
+            "learning_rate": train_cfg["learning_rate"],
+            "num_epochs": train_cfg["num_train_epochs"],
+        })
+
+        # ---- Load DPO data ----
+        train_dataset, eval_dataset = load_dpo_dataset(
+            train_path=f"./data/{tenant_id}/dpo/train_trl.json",
+            eval_path=f"./data/{tenant_id}/dpo/eval_trl.json",
+            tokenizer=tokenizer,
+        )
+        logger.info(f"DPO data: {len(train_dataset)} train, {len(eval_dataset)} eval")
+
+        # ---- Train with ref_model=None (implicit reference from PEFT base) ----
+        from trl import DPOTrainer, DPOConfig
+
+        dpo_training_config = DPOConfig(
+            output_dir=output_dir,
+            num_train_epochs=train_cfg["num_train_epochs"],
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+            learning_rate=train_cfg["learning_rate"],
+            warmup_ratio=0.1,
+            lr_scheduler_type="cosine",
+            logging_steps=2,
+            eval_strategy="epoch",
+            save_strategy="epoch",
+            save_total_limit=2,
+            fp16=True,
+            gradient_checkpointing=True,
+            optim="paged_adamw_8bit",
+            seed=42,
+            report_to="none",
+            remove_unused_columns=False,
+            beta=dpo_cfg.get("beta", 0.1),
+            loss_type=dpo_cfg.get("loss_type", "sigmoid"),
+            max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
+            max_length=dpo_cfg.get("max_length", 512),
+        )
+
+        trainer = DPOTrainer(
+            model=model,
+            ref_model=None,  # Uses PEFT base weights as implicit reference
+            args=dpo_training_config,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            tokenizer=tokenizer,
+        )
+
+        # Train
+        logger.info("Starting DPO training (simple mode, no explicit ref model)...")
+        t_start = time.time()
+        train_result = trainer.train()
+        train_time = round(time.time() - t_start, 2)
+
+        train_metrics = train_result.metrics
+        eval_metrics = trainer.evaluate()
+
+        tracker.log_metrics({
+            "dpo_train_loss": train_metrics.get("train_loss", 0),
+            "dpo_eval_loss": eval_metrics.get("eval_loss", 0),
+            "train_time_sec": train_time,
+        })
+
+        # Save
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+        metadata = {
+            "tenant_id": tenant_id,
+            "model_type": "dpo_simple",
+            "base_model": model_cfg["base_model"],
+            "sft_adapter": sft_adapter_path if has_sft else None,
+            "adapter_path": output_dir,
+            "dpo_config": dpo_cfg,
+            "train_metrics": train_metrics,
+            "eval_metrics": eval_metrics,
+            "trained_at": datetime.utcnow().isoformat(),
+            "train_time_sec": train_time,
+        }
+        (Path(output_dir) / "training_metadata.json").write_text(
+            json.dumps(metadata, indent=2, default=str)
+        )
+
+        # Register
+        registry = ModelRegistry()
+        version = f"v{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+        registry.register_model(
+            tenant_id=tenant_id,
+            model_type="dpo",
+            version=version,
+            adapter_path=output_dir,
+            base_model=model_cfg["base_model"],
+            metrics={"train_loss": train_metrics.get("train_loss"), "eval_loss": eval_metrics.get("eval_loss")},
+        )
+
+        tracker.end_run(status="FINISHED")
+
+        logger.info(f"\nDPO COMPLETE — {tenant_id.upper()}")
+        logger.info(f"Train loss: {train_metrics.get('train_loss')}")
+        logger.info(f"Eval loss: {eval_metrics.get('eval_loss')}")
+        logger.info(f"Time: {train_time}s")
+
+        return {"status": "success", "tenant_id": tenant_id, "adapter_path": output_dir}
+
+    except Exception as e:
+        logger.error(f"DPO training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        tracker.end_run(status="FAILED")
+        raise
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tenant", type=str, required=True, choices=["sis", "mfg"])
+    args = parser.parse_args()
+    train_dpo_simple(args.tenant)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## File 13: `training/merge_adapter.py`
+
+```python
+"""
+Merge LoRA adapter into base model and save as standalone model.
+Useful for deployment or as a starting point for further training.
+
+Usage:
+    python training/merge_adapter.py --tenant sis --type sft
+    python training/merge_adapter.py --tenant mfg --type dpo
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+from datetime import datetime
+
+import torch
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def merge_adapter(
+    tenant_id: str,
+    model_type: str = "sft",
+    output_dir: str = None,
+):
+    """
+    Merge a LoRA adapter into the base model.
+
+    Args:
+        tenant_id: Tenant identifier
+        model_type: "sft" or "dpo"
+        output_dir: Output directory for merged model
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import PeftModel
+
+    adapter_path = f"./models/adapters/{tenant_id}/{model_type}"
+    if not Path(adapter_path).exists():
+        raise FileNotFoundError(f"Adapter not found: {adapter_path}")
+
+    if output_dir is None:
+        output_dir = f"./models/merged/{tenant_id}_{model_type}"
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Load adapter config to get base model
+    adapter_config_path = Path(adapter_path) / "adapter_config.json"
+    if adapter_config_path.exists():
+        with open(adapter_config_path) as f:
+            adapter_config = json.load(f)
+        base_model_name = adapter_config.get("base_model_name_or_path", "Qwen/Qwen2.5-1.5B-Instruct")
+    else:
+        base_model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+
+    logger.info(f"Base model: {base_model_name}")
+    logger.info(f"Adapter: {adapter_path}")
+    logger.info(f"Output: {output_dir}")
+
+    # Load base model in full precision for merging
+    logger.info("Loading base model (full precision for merge)...")
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        torch_dtype=torch.float16,
+        device_map="cpu",  # Use CPU for merging to save GPU memory
+        trust_remote_code=True,
+        token=os.getenv("HF_TOKEN"),
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model_name,
+        trust_remote_code=True,
+        token=os.getenv("HF_TOKEN"),
+    )
+
+    # Load adapter
+    logger.info("Loading adapter...")
+    model = PeftModel.from_pretrained(model, adapter_path)
+
+    # Merge
+    logger.info("Merging adapter into base model...")
+    model = model.merge_and_unload()
+
+    # Save
+    logger.info(f"Saving merged model to {output_dir}...")
+    model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+
+    # Save merge metadata
+    merge_info = {
+        "tenant_id": tenant_id,
+        "model_type": model_type,
+        "base_model": base_model_name,
+        "adapter_path": adapter_path,
+        "merged_at": datetime.utcnow().isoformat(),
+    }
+    (Path(output_dir) / "merge_info.json").write_text(
+        json.dumps(merge_info, indent=2)
+    )
+
+    logger.info("Merge complete!")
+    return output_dir
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Merge LoRA adapter")
+    parser.add_argument("--tenant", type=str, required=True, choices=["sis", "mfg"])
+    parser.add_argument("--type", type=str, default="sft", choices=["sft", "dpo"])
+    parser.add_argument("--output", type=str, default=None)
+    args = parser.parse_args()
+
+    merge_adapter(args.tenant, args.type, args.output)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## File 14: `training/train_all.py`
+
+```python
+"""
+Orchestrator script to train all tenants sequentially.
+Handles the full training lifecycle:
+  1. SFT for tenant A
+  2. SFT for tenant B
+  3. DPO for tenant A (starting from SFT)
+  4. DPO for tenant B (starting from SFT)
+
+Usage:
+    python training/train_all.py
+    python training/train_all.py --skip-dpo
+    python training/train_all.py --tenants sis
+"""
+import argparse
+import json
+import time
+import gc
+from datetime import datetime
+from pathlib import Path
+
+import torch
+from loguru import logger
+
+from training.sft_train import train_sft
+from training.mlflow_utils import ModelRegistry
+
+
+def clear_gpu():
+    """Force GPU memory cleanup between training runs."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    logger.info("GPU memory cleared")
+
+
+def train_all(
+    tenants: list = None,
+    skip_dpo: bool = False,
+    sft_epochs: int = None,
+    dpo_epochs: int = None,
+):
+    """
+    Run full training pipeline for all tenants.
+    """
+    tenants = tenants or ["sis", "mfg"]
+
+    logger.info(f"\n{'='*70}")
+    logger.info(f"FULL TRAINING PIPELINE")
+    logger.info(f"Tenants: {tenants}")
+    logger.info(f"DPO: {'skip' if skip_dpo else 'enabled'}")
+    logger.info(f"{'='*70}")
+
+    results = {
+        "started_at": datetime.utcnow().isoformat(),
+        "tenants": tenants,
+        "sft_results": {},
+        "dpo_results": {},
+    }
+
+    t_start = time.time()
+
+    # ---- Phase 1: SFT Training ----
+    logger.info("\n📚 PHASE 1: Supervised Fine-Tuning")
+    for tenant_id in tenants:
+        logger.info(f"\n--- SFT: {tenant_id.upper()} ---")
+
+        overrides = {}
+        if sft_epochs:
+            overrides["training"] = {"num_train_epochs": sft_epochs}
+
+        try:
+            result = train_sft(tenant_id, config_override=overrides if overrides else None)
+            results["sft_results"][tenant_id] = result
+            logger.info(f"SFT {tenant_id}: ✅ train_loss={result.get('train_loss')}")
+        except Exception as e:
+            logger.error(f"SFT {tenant_id}: ❌ {e}")
+            results["sft_results"][tenant_id] = {"status": "failed", "error": str(e)}
+
+        clear_gpu()
+
+    # ---- Phase 2: DPO Training ----
+    if not skip_dpo:
+        logger.info("\n🎯 PHASE 2: DPO Preference Alignment")
+        for tenant_id in tenants:
+            logger.info(f"\n--- DPO: {tenant_id.upper()} ---")
+
+            try:
+                # Use simplified DPO to save memory
+                from training.dpo_train_simple import train_dpo_simple
+                result = train_dpo_simple(tenant_id)
+                results["dpo_results"][tenant_id] = result
+                logger.info(f"DPO {tenant_id}: ✅")
+            except Exception as e:
+                logger.error(f"DPO {tenant_id}: ❌ {e}")
+                results["dpo_results"][tenant_id] = {"status": "failed", "error": str(e)}
+
+            clear_gpu()
+
+    # ---- Summary ----
+    total_time = round(time.time() - t_start, 2)
+    results["total_time_sec"] = total_time
+    results["completed_at"] = datetime.utcnow().isoformat()
+
+    # Promote best models to production
+    registry = ModelRegistry()
+    for tenant_id in tenants:
+        # Find latest successful model
+        tenant_models = registry.list_models(tenant_id)
+        for model_type in ["dpo", "sft"]:
+            matching = [m for m in tenant_models if m["model_type"] == model_type and m.get("status") != "failed"]
+            if matching:
+                latest = matching[-1]
+                registry.promote_to_production(tenant_id, model_type, latest["version"])
+                logger.info(f"Promoted {tenant_id}/{model_type}/{latest['version']} to production")
+                break
+
+    # Save results
+    report_dir = Path("evaluation/reports")
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"training_run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    report_path.write_text(json.dumps(results, indent=2, default=str))
+
+    logger.info(f"\n{'='*70}")
+    logger.info(f"TRAINING PIPELINE COMPLETE")
+    logger.info(f"Total time: {total_time}s")
+    logger.info(f"Report: {report_path}")
+    logger.info(f"\nModel Registry:")
+    summary = registry.get_summary()
+    logger.info(f"  Total models: {summary['total_models']}")
+    logger.info(f"  Active versions: {summary['active_versions']}")
+    logger.info(f"{'='*70}")
+
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Full training pipeline")
+    parser.add_argument("--tenants", nargs="+", default=None, choices=["sis", "mfg"])
+    parser.add_argument("--skip-dpo", action="store_true")
+    parser.add_argument("--sft-epochs", type=int, default=None)
+    parser.add_argument("--dpo-epochs", type=int, default=None)
+    args = parser.parse_args()
+
+    train_all(
+        tenants=args.tenants,
+        skip_dpo=args.skip_dpo,
+        sft_epochs=args.sft_epochs,
+        dpo_epochs=args.dpo_epochs,
+    )
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## How to run this series
+
+```bash
+# STEP 1: Make sure data pipeline was run
+python -m tenant_data_pipeline.run_pipeline
+
+# STEP 2: Train SFT for both tenants
+python training/sft_train.py --tenant sis
+python training/sft_train.py --tenant mfg
+
+# STEP 3: Train DPO for both tenants (simplified, memory-efficient)
+python training/dpo_train_simple.py --tenant sis
+python training/dpo_train_simple.py --tenant mfg
+
+# OR run everything at once:
+python training/train_all.py
+
+# OR skip DPO if GPU memory is tight:
+python training/train_all.py --skip-dpo
+
+# Optional: quick test with fewer epochs
+python training/sft_train.py --tenant sis --epochs 1
+```
+
+### Expected training output
+
+```
+======================================================================
+SFT TRAINING — TENANT: SIS
+======================================================================
+Loading model: Qwen/Qwen2.5-1.5B-Instruct
+Model loaded: 1543.7M params, 0.0M trainable
+Applying LoRA adapters...
+LoRA applied: 3.41M trainable / 1543.7M total (0.22%)
+Loading SFT dataset...
+Loaded SFT data: 108 train, 12 eval
+Starting SFT training...
+
+Step   5 | Loss: 2.134
+Step  10 | Loss: 1.876
+Step  15 | Loss: 1.523
+Step  20 | Loss: 1.287 | Eval Loss: 1.412
+Step  25 | Loss: 1.089
+...
+
+SFT TRAINING COMPLETE — SIS
+Adapter saved: ./models/adapters/sis/sft
+Train loss: 0.847
+Eval loss: 1.156
+Training time: ~180s on 8GB GPU
+```
+
+### Files created after training
+
+```
+models/
+├── adapters/
+│   ├── sis/
+│   │   ├── sft/
+│   │   │   ├── adapter_config.json
+│   │   │   ├── adapter_model.safetensors
+│   │   │   ├── tokenizer.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   └── training_metadata.json
+│   │   └── dpo/
+│   │       ├── adapter_config.json
+│   │       ├── adapter_model.safetensors
+│   │       └── training_metadata.json
+│   └── mfg/
+│       ├── sft/
+│       │   └── (same structure)
+│       └── dpo/
+│           └── (same structure)
+├── registry.json
+└── base/
+    └── qwen2.5-1.5b-instruct/
+
+mlruns/
+└── local_logs/
+    ├── local_<timestamp>_sft_sis.json
+    ├── local_<timestamp>_sft_mfg.json
+    ├── local_<timestamp>_dpo_simple_sis.json
+    └── local_<timestamp>_dpo_simple_mfg.json
+
+evaluation/reports/
+└── training_run_<timestamp>.json
+```
+
+### Model registry contents (`models/registry.json`)
+
+```json
+{
+  "models": [
+    {
+      "id": "sis_sft_v202501151430",
+      "tenant_id": "sis",
+      "model_type": "sft",
+      "version": "v202501151430",
+      "adapter_path": "./models/adapters/sis/sft",
+      "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "metrics": {"train_loss": 0.847, "eval_loss": 1.156},
+      "status": "production"
+    },
+    {
+      "id": "mfg_sft_v202501151445",
+      "tenant_id": "mfg",
+      "model_type": "sft",
+      "version": "v202501151445",
+      "adapter_path": "./models/adapters/mfg/sft",
+      "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "metrics": {"train_loss": 0.912, "eval_loss": 1.203},
+      "status": "production"
+    },
+    {
+      "id": "sis_dpo_v202501151500",
+      "tenant_id": "sis",
+      "model_type": "dpo",
+      "adapter_path": "./models/adapters/sis/dpo",
+      "metrics": {"train_loss": 0.623, "eval_loss": 0.689},
+      "status": "staging"
+    }
+  ],
+  "active_versions": {
+    "sis_sft": "sis_sft_v202501151430",
+    "mfg_sft": "mfg_sft_v202501151445"
+  }
+}
+```
+
+---
+
+### Memory usage estimates for 8GB VRAM
+
+| Operation | Estimated VRAM |
+|-----------|---------------|
+| Base model (4-bit Qwen 1.5B) | ~1.2 GB |
+| LoRA adapters (r=16) | ~0.1 GB |
+| Optimizer states (paged 8-bit) | ~0.4 GB |
+| Activations + gradients (batch=2, seq=512, grad ckpt) | ~2.5 GB |
+| CUDA overhead | ~0.5 GB |
+| **Total SFT** | **~4.7 GB** ✅ |
+| DPO simple (no ref model copy) | **~5.2 GB** ✅ |
+| DPO full (with ref model) | **~7.5 GB** ⚠️ tight |
+
+The simplified DPO script (`dpo_train_simple.py`) is recommended for 8GB cards because it uses PEFT's implicit reference instead of loading a second model.
+
+---
+
+**Next: Series 4 — Evaluation & QA Framework (`evaluation/`)**
+
+Shall I continue with Series 4?

@@ -1,0 +1,13 @@
+# Lightweight CI dependencies (no CUDA/GPU)
+pytest
+pytest-cov
+requests
+pandas
+scikit-learn
+rouge-score
+pyyaml
+loguru
+python-dotenv
+pydantic>=2.6.0
+nltk
+numpy

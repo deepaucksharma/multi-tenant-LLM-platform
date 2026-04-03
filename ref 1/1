@@ -1,0 +1,609 @@
+Absolutely. I’ll share it as a **multi-part final solution**, so it’s easier to build and follow on your hardware.
+
+# Delivery plan
+I’ll split the solution into **6 series**:
+
+1. **Series 1:** Final scoped architecture, stack, repo structure, environment setup  
+2. **Series 2:** Multi-tenant data pipeline, synthetic/public data, curation, governance  
+3. **Series 3:** QLoRA fine-tuning, tenant adapters, DPO-lite alignment  
+4. **Series 4:** RAG, tenant-aware inference, FastAPI, safety/compliance, canary  
+5. **Series 5:** Web, mobile, and voice integration  
+6. **Series 6:** Evaluation, observability, MLflow, CI/CD, benchmarks, demo script
+
+---
+
+# Series 1/6 — Final scoped architecture and setup
+
+## 1. What you are actually building
+
+You are **not** building a chatbot.
+
+You are building a **mini end-to-end multi-tenant LLM platform** with:
+
+- **2 isolated tenants**
+- **1 shared base model**
+- **2 tenant-specific QLoRA adapters**
+- **2 tenant-specific vector indexes**
+- **1 tenant-aware inference API**
+- **1 web client**
+- **1 tiny mobile client**
+- **1 simple voice flow**
+- **evaluation + safety tests**
+- **MLflow + audit logging + lightweight dashboard**
+
+That is the smallest version that still visibly proves the JD.
+
+---
+
+## 2. Final POC scope
+
+## Tenant A: SIS / Education
+Use:
+- enrollment policy
+- attendance policy
+- grading policy
+- transcript handling
+- FERPA-like privacy rules
+- accommodations / IEP procedures
+- parent communication
+
+## Tenant B: Manufacturing / Industrial
+Use:
+- SOP startup process
+- QC defect taxonomy
+- CAPA workflow
+- ISO-style documentation
+- maintenance procedures
+- safety / lockout-tagout
+- production scheduling
+
+---
+
+## 3. Final stack for your machine
+
+This is the stack I recommend you lock in.
+
+## Model
+- **Base model:** `Qwen/Qwen2.5-1.5B-Instruct`
+- **Training style:** QLoRA
+- **Adapters:** one for `sis`, one for `mfg`
+
+## ML / Training
+- Python
+- PyTorch
+- Transformers
+- PEFT
+- TRL
+- Accelerate
+- bitsandbytes
+- optional: **Unsloth** if installation works for you
+
+## Retrieval
+- ChromaDB
+- sentence-transformers embeddings:
+  - `sentence-transformers/all-MiniLM-L6-v2`
+
+## Backend
+- FastAPI
+- Uvicorn
+- SSE streaming
+
+## Tracking / MLOps
+- MLflow local
+- SQLite for request/audit logs
+
+## Frontend
+- **Fastest path:** Streamlit
+- **Better portfolio path:** Next.js
+
+## Mobile
+- Expo React Native
+
+## Voice
+- `faster-whisper`
+- browser TTS or `edge-tts`
+
+---
+
+## 4. What to skip
+
+Do not spend time on:
+- 7B+ training
+- full RLHF/PPO
+- continual pretraining
+- Kubernetes
+- Airflow
+- distributed training
+- Terraform
+- on-device mobile LLM inference
+- enterprise auth stack
+
+Your desktop is enough for a **strong POC**, not for infra theater.
+
+---
+
+## 5. Final architecture
+
+```text
+                ┌──────────────────────────────┐
+                │   Web / Mobile / Voice UI    │
+                └──────────────┬───────────────┘
+                               │
+                               v
+                    ┌─────────────────────┐
+                    │   FastAPI Gateway   │
+                    │  - auth-lite        │
+                    │  - tenant_id        │
+                    │  - SSE streaming    │
+                    └───────┬─────────────┘
+                            │
+             ┌──────────────┼──────────────┐
+             │              │              │
+             v              v              v
+   ┌────────────────┐  ┌──────────────┐  ┌────────────────┐
+   │ Tenant Router  │  │ Audit / Logs │  │ Metrics Store  │
+   │ - prompt       │  │ SQLite       │  │ SQLite / JSON  │
+   │ - adapter      │  └──────────────┘  └────────────────┘
+   │ - vector index │
+   └───────┬────────┘
+           │
+           v
+   ┌───────────────────────┐
+   │   RAG Retriever       │
+   │ Chroma collections:   │
+   │ - sis_index           │
+   │ - mfg_index           │
+   └─────────┬─────────────┘
+             │
+             v
+   ┌───────────────────────────────┐
+   │ Base Model: Qwen2.5-1.5B      │
+   │ 4-bit loaded once             │
+   │ + adapter_sis                 │
+   │ + adapter_mfg                 │
+   └───────────────────────────────┘
+```
+
+---
+
+## 6. What this proves to an interviewer
+
+This POC visibly proves:
+
+- **multi-tenant isolation**
+- **tenant-specific data curation**
+- **real fine-tuning with PEFT**
+- **RAG grounding with citations**
+- **evaluation and regression testing**
+- **production-style inference routing**
+- **web/mobile/voice integration**
+- **lightweight observability/compliance**
+
+That is enough to tell a credible “I built an end-to-end multi-tenant LLM platform” story.
+
+---
+
+## 7. Final repo structure
+
+Use this simplified structure:
+
+```text
+multi_tenant_llm_poc/
+│
+├── .env
+├── requirements.txt
+├── Makefile
+├── README.md
+│
+├── data/
+│   ├── raw/
+│   │   ├── sis/
+│   │   └── mfg/
+│   ├── processed/
+│   │   ├── sis/
+│   │   └── mfg/
+│   ├── sft/
+│   │   ├── sis/
+│   │   └── mfg/
+│   ├── dpo/
+│   │   ├── sis/
+│   │   └── mfg/
+│   ├── eval/
+│   │   ├── sis/
+│   │   └── mfg/
+│   └── chroma/
+│
+├── pipeline/
+│   ├── ingest.py
+│   ├── clean_redact.py
+│   ├── chunk_docs.py
+│   ├── build_sft.py
+│   ├── build_dpo.py
+│   ├── build_eval.py
+│   └── quality_report.py
+│
+├── training/
+│   ├── train_sft.py
+│   ├── train_dpo.py
+│   ├── merge_adapter.py
+│   └── configs/
+│       ├── sis_sft.yaml
+│       ├── mfg_sft.yaml
+│       └── dpo.yaml
+│
+├── rag/
+│   ├── build_index.py
+│   └── retrieve.py
+│
+├── inference/
+│   ├── main.py
+│   ├── router.py
+│   ├── model_manager.py
+│   ├── policies.py
+│   ├── canary.py
+│   └── schemas.py
+│
+├── evaluation/
+│   ├── run_eval.py
+│   ├── safety_tests.csv
+│   ├── leakage_tests.csv
+│   ├── benchmark.py
+│   ├── hallucination_check.py
+│   └── regression.py
+│
+├── monitoring/
+│   ├── logger.py
+│   └── dashboard.py
+│
+├── web_app/
+│   └── ...
+│
+├── mobile_app/
+│   └── ...
+│
+├── voice/
+│   ├── stt.py
+│   ├── tts.py
+│   └── voice_api.py
+│
+└── mlruns/
+```
+
+---
+
+## 8. Environment setup
+
+If you are on Windows, use:
+
+- **WSL2 Ubuntu**
+- CUDA enabled
+- Python 3.10 or 3.11
+
+That will save you pain.
+
+---
+
+## 9. `.env`
+
+Use:
+
+```env
+BASE_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+DEVICE=cuda
+MAX_SEQ_LEN=512
+CHROMA_DIR=./data/chroma
+MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+SQLITE_DB=./logs/app.db
+API_PORT=8000
+WEB_PORT=3000
+VOICE_PORT=8001
+```
+
+---
+
+## 10. `requirements.txt`
+
+Keep it realistic and small:
+
+```txt
+torch
+transformers
+accelerate
+bitsandbytes
+peft
+trl
+datasets
+sentencepiece
+protobuf
+
+fastapi
+uvicorn[standard]
+sse-starlette
+pydantic
+python-dotenv
+
+chromadb
+sentence-transformers
+
+mlflow
+
+pandas
+numpy
+scikit-learn
+nltk
+rouge-score
+pypdf
+python-docx
+
+faster-whisper
+edge-tts
+
+streamlit
+httpx
+aiofiles
+loguru
+jinja2
+```
+
+If you want Presidio later, add it later. Don’t complicate setup on day 1.
+
+---
+
+## 11. `Makefile`
+
+Use a small one:
+
+```makefile
+.PHONY: setup data train index serve eval web mobile voice monitor mlflow
+
+setup:
+	pip install -r requirements.txt
+
+mlflow:
+	mlflow server --host 127.0.0.1 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns
+
+data:
+	python pipeline/ingest.py
+	python pipeline/clean_redact.py
+	python pipeline/chunk_docs.py
+	python pipeline/build_sft.py
+	python pipeline/build_dpo.py
+	python pipeline/build_eval.py
+	python pipeline/quality_report.py
+
+train:
+	python training/train_sft.py --tenant sis
+	python training/train_sft.py --tenant mfg
+
+dpo:
+	python training/train_dpo.py --tenant sis
+
+index:
+	python rag/build_index.py --tenant sis
+	python rag/build_index.py --tenant mfg
+
+serve:
+	uvicorn inference.main:app --host 0.0.0.0 --port 8000
+
+eval:
+	python evaluation/run_eval.py
+	python evaluation/hallucination_check.py
+	python evaluation/regression.py
+	python evaluation/benchmark.py
+
+web:
+	cd web_app && npm install && npm run dev
+
+voice:
+	python voice/voice_api.py
+
+monitor:
+	python monitoring/dashboard.py
+```
+
+---
+
+## 12. Final tenant isolation design
+
+This is important. Keep it simple and explicit.
+
+## Isolation rules
+Each tenant has:
+
+- separate raw docs folder
+- separate processed docs
+- separate SFT dataset
+- separate DPO dataset
+- separate Chroma collection
+- separate LoRA adapter
+- separate system prompt
+- separate evaluation set
+- separate audit tag in logs
+
+## Runtime routing
+Request payload includes:
+
+```json
+{
+  "tenant_id": "sis",
+  "message": "How do transcript requests work?"
+}
+```
+
+Backend then chooses:
+
+- `adapter_sis`
+- `chroma collection = sis_docs`
+- `system prompt = SIS-specific`
+- `policy filter = FERPA-aware`
+
+Same for manufacturing.
+
+---
+
+## 13. Final base prompts
+
+You should keep prompts short and domain-specific.
+
+## SIS system prompt
+```text
+You are a student information system assistant for a school district.
+Answer only using school-policy context and retrieved tenant documents.
+Do not reveal personally identifiable student information unless the request is explicitly authorized.
+If information is missing, say you do not have enough verified context.
+Always cite the retrieved source titles when possible.
+```
+
+## Manufacturing system prompt
+```text
+You are a manufacturing operations assistant.
+Answer only using retrieved SOP, quality, CAPA, safety, and maintenance documents.
+Never suggest bypassing required safety or compliance procedures.
+If a procedure is unclear, recommend escalation to supervisor, quality, or maintenance.
+Always cite the retrieved source titles when possible.
+```
+
+---
+
+## 14. Final dataset size
+
+This is the right size for your hardware.
+
+## Per tenant
+- **15–20 raw docs**
+- **80–100 SFT examples**
+- **10–15 DPO pairs**
+- **20 golden eval prompts**
+- **10 safety/compliance prompts**
+- **5 leakage prompts**
+- **5 prompt injection prompts**
+
+That is enough to show visible model behavior changes.
+
+---
+
+## 15. Final training configuration
+
+For 8 GB VRAM:
+
+- load base model in **4-bit**
+- max length **512**
+- per-device batch size **1**
+- gradient accumulation **8**
+- epochs **2–3**
+- LoRA rank **8**
+- LoRA alpha **16**
+- learning rate around **2e-4**
+
+That is practical.
+
+---
+
+## 16. Final acceptance criteria
+
+Your POC is “done” if you can demo all of these:
+
+### Multi-tenancy
+- ask SIS question under SIS tenant → correct SIS answer
+- ask same question under manufacturing tenant → no answer / no relevant context
+- no cross-tenant citation leakage
+
+### Fine-tuning
+- tenant adapter gives better domain phrasing than base model
+
+### RAG
+- answer includes source titles
+- response is more grounded than no-RAG baseline
+
+### Compliance
+- SIS refuses PII disclosure
+- manufacturing refuses safety bypass
+
+### Inference
+- FastAPI streams response
+- request logs show tenant, model version, latency
+
+### Apps
+- web works
+- mobile works
+- voice works
+
+### MLOps
+- MLflow has at least:
+  - baseline
+  - sis SFT
+  - mfg SFT
+  - sis DPO or alignment-lite
+
+---
+
+## 17. Suggested 4-week execution
+
+## Week 1
+- set up repo
+- create synthetic/public docs
+- ingest + clean + chunk
+- quality report
+- eval set skeleton
+
+## Week 2
+- build SFT datasets
+- train 2 adapters
+- optional tiny DPO on SIS
+- log in MLflow
+
+## Week 3
+- build RAG index
+- implement FastAPI routing
+- add policies + audit logs
+- evaluation scripts
+
+## Week 4
+- web app
+- mobile app
+- voice flow
+- monitoring page
+- demo script + screenshots
+
+---
+
+## 18. What you should demo first
+
+In the demo, always show this order:
+
+1. **Base model only**
+2. **Base + RAG**
+3. **Tenant adapter only**
+4. **Tenant adapter + RAG**
+5. **Aligned / policy-safe behavior**
+
+That makes the outcome visible instantly.
+
+---
+
+## 19. Most important practical note
+
+If time becomes tight, keep these 8:
+
+1. two tenants  
+2. two Chroma collections  
+3. two LoRA adapters  
+4. FastAPI router  
+5. citations  
+6. safety/compliance tests  
+7. web UI  
+8. voice demo + MLflow
+
+That is the minimum credible “not just a chatbot” POC.
+
+---
+
+If you want, send **“Series 2”** and I’ll continue with:
+
+- full **data pipeline**
+- synthetic document generation
+- chunking
+- metadata format
+- SFT/DPO/eval dataset builders
+- data quality and PII report scripts

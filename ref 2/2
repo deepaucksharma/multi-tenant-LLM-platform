@@ -1,0 +1,1708 @@
+
+
+# Series 2 of 10: RAG Index Building + Retrieval Layer (`rag/`)
+
+This covers tenant-isolated vector indexing, embedding, hybrid retrieval (semantic + keyword), reranking, citation-grounded response generation, and the full RAG pipeline that connects to the inference layer.
+
+---
+
+## File 1: `rag/__init__.py`
+
+```python
+"""RAG (Retrieval-Augmented Generation) module for multi-tenant knowledge retrieval."""
+```
+
+---
+
+## File 2: `rag/config.py`
+
+```python
+"""RAG configuration."""
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Optional
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+@dataclass
+class RAGConfig:
+    # Embedding model
+    embed_model_name: str = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    embed_model_path: Optional[str] = None  # Local path override
+
+    # Chroma
+    chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma")
+
+    # Retrieval
+    top_k: int = 5
+    rerank_top_k: int = 3
+    similarity_threshold: float = 0.3
+
+    # Chunking (already done in pipeline, but kept for reference)
+    chunk_size: int = 512
+    chunk_overlap: int = 64
+
+    # BM25
+    use_hybrid: bool = True
+    bm25_weight: float = 0.3
+    semantic_weight: float = 0.7
+
+    # Reranking
+    use_reranker: bool = True
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+RAG_CONFIG = RAGConfig()
+```
+
+---
+
+## File 3: `rag/embeddings.py`
+
+```python
+"""
+Embedding model management.
+Uses sentence-transformers for local embedding generation.
+Supports batched encoding for efficiency.
+"""
+import os
+from typing import List, Optional
+from pathlib import Path
+
+import numpy as np
+from loguru import logger
+
+from rag.config import RAG_CONFIG
+
+# Lazy-loaded singleton
+_embed_model = None
+
+
+def get_embed_model():
+    """Get or initialize the embedding model (singleton)."""
+    global _embed_model
+    if _embed_model is None:
+        from sentence_transformers import SentenceTransformer
+
+        model_path = RAG_CONFIG.embed_model_path or RAG_CONFIG.embed_model_name
+        logger.info(f"Loading embedding model: {model_path}")
+
+        _embed_model = SentenceTransformer(
+            model_path,
+            device="cpu",  # Embeddings on CPU to save GPU for LLM
+        )
+        logger.info(
+            f"Embedding model loaded. Dimension: {_embed_model.get_sentence_embedding_dimension()}"
+        )
+    return _embed_model
+
+
+def embed_texts(texts: List[str], batch_size: int = 64, show_progress: bool = False) -> np.ndarray:
+    """Embed a list of texts, returning numpy array of shape (N, dim)."""
+    model = get_embed_model()
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=show_progress,
+        normalize_embeddings=True,  # For cosine similarity
+        convert_to_numpy=True,
+    )
+    return embeddings
+
+
+def embed_query(query: str) -> List[float]:
+    """Embed a single query string, returning a list of floats."""
+    model = get_embed_model()
+    embedding = model.encode(
+        query,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+    )
+    return embedding.tolist()
+
+
+def get_embedding_dimension() -> int:
+    """Return the embedding vector dimension."""
+    model = get_embed_model()
+    return model.get_sentence_embedding_dimension()
+```
+
+---
+
+## File 4: `rag/build_index.py`
+
+```python
+"""
+Build tenant-isolated vector indexes in ChromaDB.
+Each tenant gets its own Chroma collection with metadata.
+"""
+import json
+import time
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import chromadb
+from chromadb.config import Settings
+from loguru import logger
+
+from rag.config import RAG_CONFIG
+from rag.embeddings import embed_texts, get_embedding_dimension
+from tenant_data_pipeline.config import TENANTS
+
+
+def get_chroma_client() -> chromadb.ClientAPI:
+    """Get persistent Chroma client."""
+    persist_dir = RAG_CONFIG.chroma_persist_dir
+    Path(persist_dir).mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=persist_dir)
+    return client
+
+
+def get_collection_name(tenant_id: str) -> str:
+    """Generate collection name for a tenant."""
+    return f"tenant_{tenant_id}_docs"
+
+
+def build_tenant_index(tenant_id: str, force_rebuild: bool = False) -> Dict:
+    """Build vector index for a single tenant."""
+    config = TENANTS[tenant_id]
+    chunks_path = config.chunks_dir / "chunks.json"
+
+    if not chunks_path.exists():
+        logger.error(f"[{tenant_id}] No chunks found at {chunks_path}. Run data pipeline first.")
+        return {"tenant_id": tenant_id, "status": "error", "reason": "no chunks"}
+
+    with open(chunks_path) as f:
+        chunks = json.load(f)
+
+    if not chunks:
+        logger.warning(f"[{tenant_id}] Empty chunks file")
+        return {"tenant_id": tenant_id, "status": "error", "reason": "empty chunks"}
+
+    client = get_chroma_client()
+    collection_name = get_collection_name(tenant_id)
+
+    # Delete existing collection if force rebuild
+    if force_rebuild:
+        try:
+            client.delete_collection(collection_name)
+            logger.info(f"[{tenant_id}] Deleted existing collection: {collection_name}")
+        except Exception:
+            pass
+
+    # Create or get collection
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        metadata={
+            "tenant_id": tenant_id,
+            "domain": config.domain,
+            "hnsw:space": "cosine",
+        },
+    )
+
+    # Check if already populated
+    existing_count = collection.count()
+    if existing_count > 0 and not force_rebuild:
+        logger.info(
+            f"[{tenant_id}] Collection already has {existing_count} documents. "
+            f"Use force_rebuild=True to rebuild."
+        )
+        return {
+            "tenant_id": tenant_id,
+            "status": "exists",
+            "document_count": existing_count,
+        }
+
+    # Prepare data for indexing
+    texts = [chunk["content"] for chunk in chunks]
+    ids = [chunk["chunk_id"] for chunk in chunks]
+    metadatas = [
+        {
+            "tenant_id": chunk["tenant_id"],
+            "doc_id": chunk["doc_id"],
+            "title": chunk["title"],
+            "topic": chunk["topic"],
+            "chunk_index": chunk["chunk_index"],
+            "total_chunks": chunk["total_chunks"],
+            "source_file": chunk["source_file"],
+            "char_count": chunk["char_count"],
+            "word_count": chunk["word_count"],
+        }
+        for chunk in chunks
+    ]
+
+    # Generate embeddings
+    logger.info(f"[{tenant_id}] Embedding {len(texts)} chunks...")
+    t0 = time.time()
+    embeddings = embed_texts(texts, show_progress=True)
+    embed_time = round(time.time() - t0, 2)
+    logger.info(f"[{tenant_id}] Embedding complete in {embed_time}s")
+
+    # Index in batches (Chroma has limits on batch size)
+    batch_size = 100
+    for i in range(0, len(texts), batch_size):
+        end = min(i + batch_size, len(texts))
+        collection.add(
+            ids=ids[i:end],
+            documents=texts[i:end],
+            embeddings=embeddings[i:end].tolist(),
+            metadatas=metadatas[i:end],
+        )
+
+    final_count = collection.count()
+    logger.info(f"[{tenant_id}] Indexed {final_count} chunks into collection '{collection_name}'")
+
+    return {
+        "tenant_id": tenant_id,
+        "status": "success",
+        "collection_name": collection_name,
+        "document_count": final_count,
+        "embedding_time_sec": embed_time,
+        "embedding_dimension": embeddings.shape[1],
+    }
+
+
+def build_all_indexes(force_rebuild: bool = False) -> Dict:
+    """Build indexes for all tenants."""
+    results = {}
+    for tenant_id in TENANTS:
+        results[tenant_id] = build_tenant_index(tenant_id, force_rebuild=force_rebuild)
+    return results
+
+
+def list_collections() -> List[Dict]:
+    """List all existing collections."""
+    client = get_chroma_client()
+    collections = client.list_collections()
+    info = []
+    for col in collections:
+        c = client.get_collection(col.name)
+        info.append({
+            "name": col.name,
+            "count": c.count(),
+            "metadata": col.metadata,
+        })
+    return info
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build RAG indexes")
+    parser.add_argument("--force", action="store_true", help="Force rebuild indexes")
+    parser.add_argument("--list", action="store_true", help="List existing collections")
+    args = parser.parse_args()
+
+    if args.list:
+        collections = list_collections()
+        print("\nExisting collections:")
+        for c in collections:
+            print(f"  {c['name']}: {c['count']} documents")
+    else:
+        results = build_all_indexes(force_rebuild=args.force)
+        print("\nIndex build results:")
+        for tid, result in results.items():
+            print(f"  [{tid}] {result['status']}: {result.get('document_count', 0)} documents")
+```
+
+---
+
+## File 5: `rag/bm25_index.py`
+
+```python
+"""
+BM25 keyword index for hybrid retrieval.
+Provides sparse keyword matching to complement dense vector search.
+"""
+import json
+import math
+import re
+from collections import Counter
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass
+
+from loguru import logger
+
+from tenant_data_pipeline.config import TENANTS
+
+
+@dataclass
+class BM25Result:
+    chunk_id: str
+    score: float
+    content: str
+    metadata: Dict
+
+
+class BM25Index:
+    """Simple BM25 implementation for hybrid retrieval."""
+
+    def __init__(self, k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self.docs: List[Dict] = []
+        self.doc_freqs: List[Counter] = []
+        self.idf: Dict[str, float] = {}
+        self.avg_dl: float = 0.0
+        self.n_docs: int = 0
+        self._built = False
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Simple whitespace + punctuation tokenizer with lowercasing."""
+        text = text.lower()
+        text = re.sub(r'[^\w\s]', ' ', text)
+        tokens = text.split()
+        # Remove very short tokens and stopwords
+        stopwords = {
+            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+            'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+            'would', 'could', 'should', 'may', 'might', 'shall', 'can',
+            'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+            'as', 'into', 'through', 'during', 'before', 'after',
+            'and', 'but', 'or', 'nor', 'not', 'so', 'yet',
+            'it', 'its', 'this', 'that', 'these', 'those',
+        }
+        return [t for t in tokens if len(t) > 1 and t not in stopwords]
+
+    def build(self, documents: List[Dict]):
+        """Build BM25 index from document list."""
+        self.docs = documents
+        self.n_docs = len(documents)
+        self.doc_freqs = []
+
+        # Compute term frequencies per document
+        doc_lengths = []
+        df = Counter()  # Document frequency per term
+
+        for doc in documents:
+            tokens = self._tokenize(doc["content"])
+            doc_lengths.append(len(tokens))
+            tf = Counter(tokens)
+            self.doc_freqs.append(tf)
+            # Count document frequency (how many docs contain each term)
+            for term in set(tokens):
+                df[term] += 1
+
+        self.avg_dl = sum(doc_lengths) / max(self.n_docs, 1)
+
+        # Compute IDF
+        self.idf = {}
+        for term, freq in df.items():
+            self.idf[term] = math.log((self.n_docs - freq + 0.5) / (freq + 0.5) + 1.0)
+
+        self._built = True
+        logger.info(f"BM25 index built: {self.n_docs} documents, {len(self.idf)} unique terms")
+
+    def search(self, query: str, top_k: int = 5) -> List[BM25Result]:
+        """Search the BM25 index."""
+        if not self._built:
+            raise RuntimeError("BM25 index not built. Call build() first.")
+
+        query_tokens = self._tokenize(query)
+        scores = []
+
+        for idx, (doc, tf) in enumerate(zip(self.docs, self.doc_freqs)):
+            score = 0.0
+            doc_len = sum(tf.values())
+
+            for term in query_tokens:
+                if term not in self.idf:
+                    continue
+                term_freq = tf.get(term, 0)
+                idf = self.idf[term]
+                numerator = term_freq * (self.k1 + 1)
+                denominator = term_freq + self.k1 * (
+                    1 - self.b + self.b * (doc_len / max(self.avg_dl, 1))
+                )
+                score += idf * (numerator / max(denominator, 0.001))
+
+            if score > 0:
+                scores.append((idx, score))
+
+        # Sort by score descending
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        results = []
+        for idx, score in scores[:top_k]:
+            doc = self.docs[idx]
+            results.append(BM25Result(
+                chunk_id=doc.get("chunk_id", f"doc_{idx}"),
+                score=score,
+                content=doc["content"],
+                metadata={k: v for k, v in doc.items() if k != "content"},
+            ))
+
+        return results
+
+
+# Cache for tenant BM25 indexes
+_bm25_indexes: Dict[str, BM25Index] = {}
+
+
+def get_bm25_index(tenant_id: str) -> BM25Index:
+    """Get or build BM25 index for a tenant."""
+    if tenant_id in _bm25_indexes:
+        return _bm25_indexes[tenant_id]
+
+    config = TENANTS[tenant_id]
+    chunks_path = config.chunks_dir / "chunks.json"
+
+    if not chunks_path.exists():
+        raise FileNotFoundError(f"No chunks found for tenant {tenant_id}")
+
+    with open(chunks_path) as f:
+        chunks = json.load(f)
+
+    index = BM25Index()
+    index.build(chunks)
+    _bm25_indexes[tenant_id] = index
+
+    return index
+
+
+def search_bm25(tenant_id: str, query: str, top_k: int = 5) -> List[BM25Result]:
+    """Search BM25 index for a tenant."""
+    index = get_bm25_index(tenant_id)
+    return index.search(query, top_k=top_k)
+
+
+if __name__ == "__main__":
+    # Quick test
+    for tid in TENANTS:
+        try:
+            results = search_bm25(tid, "What is the enrollment process?", top_k=3)
+            print(f"\n[{tid}] BM25 results:")
+            for r in results:
+                print(f"  Score: {r.score:.3f} | {r.content[:80]}...")
+        except FileNotFoundError as e:
+            print(f"[{tid}] {e}")
+```
+
+---
+
+## File 6: `rag/reranker.py`
+
+```python
+"""
+Cross-encoder reranker for improving retrieval precision.
+Re-scores retrieved documents against the query using a cross-encoder model.
+"""
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass
+
+from loguru import logger
+
+from rag.config import RAG_CONFIG
+
+# Lazy-loaded singleton
+_reranker_model = None
+
+
+@dataclass
+class RankedResult:
+    chunk_id: str
+    content: str
+    metadata: Dict
+    original_score: float
+    rerank_score: float
+    final_rank: int
+
+
+def get_reranker():
+    """Get or initialize the cross-encoder reranker (singleton)."""
+    global _reranker_model
+    if _reranker_model is None:
+        try:
+            from sentence_transformers import CrossEncoder
+
+            logger.info(f"Loading reranker: {RAG_CONFIG.reranker_model}")
+            _reranker_model = CrossEncoder(
+                RAG_CONFIG.reranker_model,
+                max_length=512,
+                device="cpu",  # Keep on CPU to save GPU
+            )
+            logger.info("Reranker loaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load reranker: {e}. Reranking disabled.")
+            _reranker_model = "disabled"
+    return _reranker_model
+
+
+def rerank(
+    query: str,
+    results: List[Dict],
+    top_k: int = 3,
+) -> List[RankedResult]:
+    """
+    Rerank retrieved results using cross-encoder.
+
+    Args:
+        query: The user query
+        results: List of dicts with 'chunk_id', 'content', 'metadata', 'score'
+        top_k: Number of results to return after reranking
+
+    Returns:
+        List of RankedResult sorted by rerank score
+    """
+    if not results:
+        return []
+
+    model = get_reranker()
+
+    if model == "disabled" or model is None:
+        # Fallback: return original order
+        return [
+            RankedResult(
+                chunk_id=r.get("chunk_id", ""),
+                content=r.get("content", ""),
+                metadata=r.get("metadata", {}),
+                original_score=r.get("score", 0.0),
+                rerank_score=r.get("score", 0.0),
+                final_rank=i + 1,
+            )
+            for i, r in enumerate(results[:top_k])
+        ]
+
+    # Prepare query-document pairs
+    pairs = [(query, r["content"]) for r in results]
+
+    # Score with cross-encoder
+    scores = model.predict(pairs)
+
+    # Combine with results
+    scored_results = []
+    for i, (result, rerank_score) in enumerate(zip(results, scores)):
+        scored_results.append({
+            "chunk_id": result.get("chunk_id", ""),
+            "content": result.get("content", ""),
+            "metadata": result.get("metadata", {}),
+            "original_score": result.get("score", 0.0),
+            "rerank_score": float(rerank_score),
+        })
+
+    # Sort by rerank score descending
+    scored_results.sort(key=lambda x: x["rerank_score"], reverse=True)
+
+    # Return top_k
+    ranked = []
+    for i, r in enumerate(scored_results[:top_k]):
+        ranked.append(RankedResult(
+            chunk_id=r["chunk_id"],
+            content=r["content"],
+            metadata=r["metadata"],
+            original_score=r["original_score"],
+            rerank_score=r["rerank_score"],
+            final_rank=i + 1,
+        ))
+
+    return ranked
+```
+
+---
+
+## File 7: `rag/retriever.py`
+
+```python
+"""
+Multi-tenant retriever with hybrid search (semantic + BM25) and reranking.
+This is the main retrieval interface used by the inference layer.
+"""
+import json
+import time
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, asdict, field
+from datetime import datetime
+
+import chromadb
+from loguru import logger
+
+from rag.config import RAG_CONFIG
+from rag.embeddings import embed_query
+from rag.build_index import get_chroma_client, get_collection_name
+from rag.bm25_index import search_bm25, BM25Result
+from rag.reranker import rerank, RankedResult
+
+
+@dataclass
+class RetrievedChunk:
+    """A single retrieved chunk with all metadata."""
+    chunk_id: str
+    content: str
+    title: str
+    topic: str
+    source_file: str
+    tenant_id: str
+    score: float
+    retrieval_method: str  # "semantic", "bm25", "hybrid"
+    rank: int
+    citation_key: str = ""
+
+    def __post_init__(self):
+        if not self.citation_key:
+            self.citation_key = f"[{self.title} — {self.topic}]"
+
+
+@dataclass
+class RetrievalResult:
+    """Complete retrieval result for a query."""
+    query: str
+    tenant_id: str
+    chunks: List[RetrievedChunk]
+    total_retrieved: int
+    retrieval_method: str
+    retrieval_time_ms: float
+    metadata: Dict = field(default_factory=dict)
+
+
+class TenantRetriever:
+    """
+    Retriever that enforces tenant isolation and supports hybrid search.
+    """
+
+    def __init__(self):
+        self._chroma_client: Optional[chromadb.ClientAPI] = None
+
+    @property
+    def chroma_client(self) -> chromadb.ClientAPI:
+        if self._chroma_client is None:
+            self._chroma_client = get_chroma_client()
+        return self._chroma_client
+
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        top_k: int = None,
+        use_hybrid: bool = None,
+        use_reranker: bool = None,
+        topic_filter: Optional[str] = None,
+    ) -> RetrievalResult:
+        """
+        Retrieve relevant chunks for a query within a tenant's scope.
+
+        Args:
+            query: User query
+            tenant_id: Tenant identifier (enforces isolation)
+            top_k: Number of results to return
+            use_hybrid: Whether to use hybrid retrieval
+            use_reranker: Whether to use cross-encoder reranking
+            topic_filter: Optional topic filter
+
+        Returns:
+            RetrievalResult with ranked chunks
+        """
+        top_k = top_k or RAG_CONFIG.rerank_top_k
+        use_hybrid = use_hybrid if use_hybrid is not None else RAG_CONFIG.use_hybrid
+        use_reranker = use_reranker if use_reranker is not None else RAG_CONFIG.use_reranker
+
+        t0 = time.time()
+
+        # Fetch more candidates than needed for reranking
+        candidate_k = max(top_k * 3, RAG_CONFIG.top_k)
+
+        # --- Semantic search ---
+        semantic_results = self._semantic_search(
+            query, tenant_id, candidate_k, topic_filter
+        )
+
+        # --- BM25 search ---
+        bm25_results = []
+        if use_hybrid:
+            try:
+                bm25_results = self._bm25_search(query, tenant_id, candidate_k)
+            except Exception as e:
+                logger.warning(f"BM25 search failed for {tenant_id}: {e}")
+
+        # --- Merge results ---
+        if use_hybrid and bm25_results:
+            merged = self._merge_hybrid(
+                semantic_results, bm25_results,
+                semantic_weight=RAG_CONFIG.semantic_weight,
+                bm25_weight=RAG_CONFIG.bm25_weight,
+            )
+            retrieval_method = "hybrid"
+        else:
+            merged = semantic_results
+            retrieval_method = "semantic"
+
+        # --- Rerank ---
+        if use_reranker and len(merged) > top_k:
+            reranked = rerank(query, merged, top_k=top_k)
+            final_chunks = [
+                RetrievedChunk(
+                    chunk_id=r.chunk_id,
+                    content=r.content,
+                    title=r.metadata.get("title", ""),
+                    topic=r.metadata.get("topic", ""),
+                    source_file=r.metadata.get("source_file", ""),
+                    tenant_id=tenant_id,
+                    score=r.rerank_score,
+                    retrieval_method=f"{retrieval_method}+reranked",
+                    rank=r.final_rank,
+                )
+                for r in reranked
+            ]
+        else:
+            # Take top_k from merged
+            final_chunks = [
+                RetrievedChunk(
+                    chunk_id=r.get("chunk_id", ""),
+                    content=r.get("content", ""),
+                    title=r.get("metadata", {}).get("title", ""),
+                    topic=r.get("metadata", {}).get("topic", ""),
+                    source_file=r.get("metadata", {}).get("source_file", ""),
+                    tenant_id=tenant_id,
+                    score=r.get("score", 0.0),
+                    retrieval_method=retrieval_method,
+                    rank=i + 1,
+                )
+                for i, r in enumerate(merged[:top_k])
+            ]
+
+        retrieval_time = round((time.time() - t0) * 1000, 2)
+
+        return RetrievalResult(
+            query=query,
+            tenant_id=tenant_id,
+            chunks=final_chunks,
+            total_retrieved=len(final_chunks),
+            retrieval_method=retrieval_method + ("+reranked" if use_reranker else ""),
+            retrieval_time_ms=retrieval_time,
+            metadata={
+                "semantic_candidates": len(semantic_results),
+                "bm25_candidates": len(bm25_results),
+                "topic_filter": topic_filter,
+            },
+        )
+
+    def _semantic_search(
+        self,
+        query: str,
+        tenant_id: str,
+        top_k: int,
+        topic_filter: Optional[str] = None,
+    ) -> List[Dict]:
+        """Perform semantic search using ChromaDB."""
+        collection_name = get_collection_name(tenant_id)
+
+        try:
+            collection = self.chroma_client.get_collection(collection_name)
+        except Exception as e:
+            logger.error(f"Collection not found for tenant {tenant_id}: {e}")
+            return []
+
+        # Build where clause for tenant isolation + optional topic filter
+        where_clause = {"tenant_id": tenant_id}
+        if topic_filter:
+            where_clause = {
+                "$and": [
+                    {"tenant_id": tenant_id},
+                    {"topic": topic_filter},
+                ]
+            }
+
+        # Embed query
+        query_embedding = embed_query(query)
+
+        # Search
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=min(top_k, collection.count()),
+                where=where_clause if topic_filter else {"tenant_id": tenant_id},
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:
+            logger.error(f"Chroma query failed: {e}")
+            # Retry without where clause
+            try:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(top_k, collection.count()),
+                    include=["documents", "metadatas", "distances"],
+                )
+            except Exception as e2:
+                logger.error(f"Chroma query retry failed: {e2}")
+                return []
+
+        # Format results
+        formatted = []
+        if results and results["ids"] and results["ids"][0]:
+            for i in range(len(results["ids"][0])):
+                distance = results["distances"][0][i] if results["distances"] else 1.0
+                # Chroma returns distance, convert to similarity (cosine)
+                similarity = 1.0 - distance
+
+                if similarity < RAG_CONFIG.similarity_threshold:
+                    continue
+
+                formatted.append({
+                    "chunk_id": results["ids"][0][i],
+                    "content": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                    "score": similarity,
+                })
+
+        return formatted
+
+    def _bm25_search(self, query: str, tenant_id: str, top_k: int) -> List[Dict]:
+        """Perform BM25 keyword search."""
+        bm25_results = search_bm25(tenant_id, query, top_k=top_k)
+
+        # Normalize BM25 scores to [0, 1]
+        if bm25_results:
+            max_score = max(r.score for r in bm25_results)
+            min_score = min(r.score for r in bm25_results)
+            score_range = max_score - min_score if max_score != min_score else 1.0
+        else:
+            return []
+
+        formatted = []
+        for r in bm25_results:
+            normalized_score = (r.score - min_score) / score_range if score_range > 0 else 0.5
+            formatted.append({
+                "chunk_id": r.chunk_id,
+                "content": r.content,
+                "metadata": r.metadata,
+                "score": normalized_score,
+            })
+
+        return formatted
+
+    def _merge_hybrid(
+        self,
+        semantic_results: List[Dict],
+        bm25_results: List[Dict],
+        semantic_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+    ) -> List[Dict]:
+        """Merge semantic and BM25 results using weighted reciprocal rank fusion."""
+        # Build score maps
+        scores: Dict[str, Dict] = {}
+
+        for rank, result in enumerate(semantic_results):
+            cid = result["chunk_id"]
+            rrf_score = 1.0 / (rank + 60)  # RRF constant = 60
+            scores[cid] = {
+                "chunk_id": cid,
+                "content": result["content"],
+                "metadata": result["metadata"],
+                "semantic_score": result["score"],
+                "bm25_score": 0.0,
+                "rrf_semantic": rrf_score * semantic_weight,
+                "rrf_bm25": 0.0,
+            }
+
+        for rank, result in enumerate(bm25_results):
+            cid = result["chunk_id"]
+            rrf_score = 1.0 / (rank + 60)
+            if cid in scores:
+                scores[cid]["bm25_score"] = result["score"]
+                scores[cid]["rrf_bm25"] = rrf_score * bm25_weight
+            else:
+                scores[cid] = {
+                    "chunk_id": cid,
+                    "content": result["content"],
+                    "metadata": result["metadata"],
+                    "semantic_score": 0.0,
+                    "bm25_score": result["score"],
+                    "rrf_semantic": 0.0,
+                    "rrf_bm25": rrf_score * bm25_weight,
+                }
+
+        # Compute final score
+        for cid in scores:
+            scores[cid]["score"] = scores[cid]["rrf_semantic"] + scores[cid]["rrf_bm25"]
+
+        # Sort by final score
+        merged = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
+
+        return merged
+
+
+# Module-level singleton
+_retriever: Optional[TenantRetriever] = None
+
+
+def get_retriever() -> TenantRetriever:
+    """Get or create the singleton retriever."""
+    global _retriever
+    if _retriever is None:
+        _retriever = TenantRetriever()
+    return _retriever
+
+
+def retrieve(
+    query: str,
+    tenant_id: str,
+    top_k: int = 3,
+    **kwargs,
+) -> RetrievalResult:
+    """Convenience function for retrieval."""
+    retriever = get_retriever()
+    return retriever.retrieve(query, tenant_id, top_k=top_k, **kwargs)
+
+
+def format_context_for_llm(result: RetrievalResult) -> str:
+    """
+    Format retrieved chunks into a context string for the LLM prompt.
+    Includes citation keys for grounding verification.
+    """
+    if not result.chunks:
+        return "No relevant information found in the knowledge base."
+
+    context_parts = []
+    for chunk in result.chunks:
+        citation = chunk.citation_key
+        context_parts.append(
+            f"--- Source: {citation} (relevance: {chunk.score:.2f}) ---\n"
+            f"{chunk.content}\n"
+        )
+
+    return "\n".join(context_parts)
+
+
+def format_citations(result: RetrievalResult) -> List[Dict]:
+    """Extract citation information from retrieval results."""
+    citations = []
+    for chunk in result.chunks:
+        citations.append({
+            "citation_key": chunk.citation_key,
+            "title": chunk.title,
+            "topic": chunk.topic,
+            "source_file": chunk.source_file,
+            "relevance_score": round(chunk.score, 3),
+            "retrieval_method": chunk.retrieval_method,
+        })
+    return citations
+
+
+if __name__ == "__main__":
+    # Test retrieval for both tenants
+    test_queries = {
+        "sis": [
+            "What is the enrollment process for new students?",
+            "How does FERPA protect student records?",
+            "What happens after 5 unexcused absences?",
+        ],
+        "mfg": [
+            "What is the assembly line startup procedure?",
+            "How are critical defects handled?",
+            "What is the lockout tagout procedure?",
+        ],
+    }
+
+    for tenant_id, queries in test_queries.items():
+        print(f"\n{'='*70}")
+        print(f"TENANT: {tenant_id.upper()}")
+        print(f"{'='*70}")
+
+        for query in queries:
+            result = retrieve(query, tenant_id, top_k=3)
+            print(f"\nQuery: {query}")
+            print(f"Method: {result.retrieval_method} | Time: {result.retrieval_time_ms}ms")
+            for chunk in result.chunks:
+                print(f"  [{chunk.rank}] Score: {chunk.score:.3f} | {chunk.citation_key}")
+                print(f"      {chunk.content[:100]}...")
+
+    # Cross-tenant isolation test
+    print(f"\n{'='*70}")
+    print("CROSS-TENANT ISOLATION TEST")
+    print(f"{'='*70}")
+
+    # Ask SIS question to MFG tenant
+    result = retrieve("What is the FERPA compliance process?", "mfg", top_k=3)
+    print(f"\nAsking SIS question to MFG tenant:")
+    print(f"Results: {result.total_retrieved} chunks")
+    for chunk in result.chunks:
+        print(f"  Score: {chunk.score:.3f} | Topic: {chunk.topic}")
+    if result.total_retrieved == 0 or all(c.score < 0.5 for c in result.chunks):
+        print("  ✅ No relevant cross-tenant leakage")
+    else:
+        print("  ⚠️ Potential cross-tenant content found")
+```
+
+---
+
+## File 8: `rag/grounding.py`
+
+```python
+"""
+Grounding verification for RAG responses.
+Checks if LLM output is supported by retrieved context.
+Detects hallucinated claims not backed by source documents.
+"""
+import re
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from loguru import logger
+
+
+@dataclass
+class GroundingClaim:
+    """A single claim extracted from the LLM response."""
+    claim_text: str
+    is_grounded: bool
+    supporting_chunk: Optional[str] = None
+    confidence: float = 0.0
+
+
+@dataclass
+class GroundingReport:
+    """Full grounding verification report for a response."""
+    response_text: str
+    total_claims: int
+    grounded_claims: int
+    ungrounded_claims: int
+    grounding_score: float  # 0.0 to 1.0
+    claims: List[GroundingClaim]
+    has_citations: bool
+    citation_count: int
+    verified_at: str = ""
+
+    def __post_init__(self):
+        if not self.verified_at:
+            self.verified_at = datetime.utcnow().isoformat()
+
+
+def extract_claims(response_text: str) -> List[str]:
+    """
+    Extract verifiable claims from a response.
+    Simple sentence-level extraction.
+    """
+    # Split into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', response_text)
+
+    claims = []
+    for sent in sentences:
+        sent = sent.strip()
+        if len(sent) < 15:
+            continue
+        # Skip meta-sentences that aren't factual claims
+        skip_patterns = [
+            r'^(I |Let me|Here|Sure|Of course|Based on|According)',
+            r'^(Yes|No|However|Additionally|Furthermore|In summary)',
+            r'(I\'m not sure|I cannot|I don\'t have)',
+        ]
+        is_meta = False
+        for pat in skip_patterns:
+            if re.match(pat, sent, re.IGNORECASE):
+                is_meta = True
+                break
+
+        if not is_meta or len(sent) > 50:
+            claims.append(sent)
+
+    return claims
+
+
+def check_claim_against_context(
+    claim: str,
+    context_chunks: List[str],
+    threshold: float = 0.3,
+) -> Tuple[bool, Optional[str], float]:
+    """
+    Check if a claim is supported by any context chunk.
+    Uses keyword overlap as a simple grounding heuristic.
+
+    Returns: (is_grounded, supporting_chunk_or_none, confidence)
+    """
+    claim_lower = claim.lower()
+    claim_words = set(re.findall(r'\b\w{3,}\b', claim_lower))
+
+    if not claim_words:
+        return True, None, 1.0  # Can't verify, assume grounded
+
+    best_overlap = 0.0
+    best_chunk = None
+
+    for chunk in context_chunks:
+        chunk_lower = chunk.lower()
+        chunk_words = set(re.findall(r'\b\w{3,}\b', chunk_lower))
+
+        if not chunk_words:
+            continue
+
+        # Jaccard-like overlap
+        overlap = len(claim_words & chunk_words) / len(claim_words)
+
+        # Also check for key phrase containment
+        # Extract multi-word phrases from claim
+        key_phrases = re.findall(r'\b\w+\s+\w+(?:\s+\w+)?\b', claim_lower)
+        phrase_found = any(phrase in chunk_lower for phrase in key_phrases if len(phrase) > 8)
+
+        if phrase_found:
+            overlap = max(overlap, 0.6)
+
+        # Check for number/specific value mentions
+        claim_numbers = set(re.findall(r'\b\d+(?:\.\d+)?%?\b', claim))
+        if claim_numbers:
+            chunk_numbers = set(re.findall(r'\b\d+(?:\.\d+)?%?\b', chunk))
+            if claim_numbers & chunk_numbers:
+                overlap = max(overlap, 0.5)
+            elif claim_numbers and not (claim_numbers & chunk_numbers):
+                # Claim has numbers not found in any chunk — suspicious
+                overlap = min(overlap, 0.2)
+
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_chunk = chunk
+
+    is_grounded = best_overlap >= threshold
+    return is_grounded, best_chunk if is_grounded else None, best_overlap
+
+
+def verify_grounding(
+    response_text: str,
+    context_chunks: List[str],
+    threshold: float = 0.3,
+) -> GroundingReport:
+    """
+    Verify that an LLM response is grounded in the retrieved context.
+
+    Args:
+        response_text: The LLM's response
+        context_chunks: List of retrieved document chunks
+        threshold: Minimum overlap score to consider a claim grounded
+
+    Returns:
+        GroundingReport with claim-level verification
+    """
+    # Extract claims
+    claims_text = extract_claims(response_text)
+
+    if not claims_text:
+        return GroundingReport(
+            response_text=response_text,
+            total_claims=0,
+            grounded_claims=0,
+            ungrounded_claims=0,
+            grounding_score=1.0,
+            claims=[],
+            has_citations=False,
+            citation_count=0,
+        )
+
+    # Verify each claim
+    verified_claims = []
+    for claim_text in claims_text:
+        is_grounded, supporting, confidence = check_claim_against_context(
+            claim_text, context_chunks, threshold
+        )
+        verified_claims.append(GroundingClaim(
+            claim_text=claim_text,
+            is_grounded=is_grounded,
+            supporting_chunk=supporting[:200] if supporting else None,
+            confidence=confidence,
+        ))
+
+    # Count
+    grounded = sum(1 for c in verified_claims if c.is_grounded)
+    ungrounded = len(verified_claims) - grounded
+
+    # Check for citation patterns
+    citation_patterns = [
+        r'\[.*?\]',  # [Source Name]
+        r'(?:according to|per|as stated in|as described in)',
+        r'(?:source:|reference:|see:)',
+    ]
+    citation_count = 0
+    for pattern in citation_patterns:
+        citation_count += len(re.findall(pattern, response_text, re.IGNORECASE))
+
+    grounding_score = grounded / len(verified_claims) if verified_claims else 1.0
+
+    return GroundingReport(
+        response_text=response_text,
+        total_claims=len(verified_claims),
+        grounded_claims=grounded,
+        ungrounded_claims=ungrounded,
+        grounding_score=round(grounding_score, 3),
+        claims=verified_claims,
+        has_citations=citation_count > 0,
+        citation_count=citation_count,
+    )
+
+
+def format_grounding_report(report: GroundingReport) -> str:
+    """Format grounding report as human-readable text."""
+    lines = [
+        f"=== Grounding Verification Report ===",
+        f"Grounding Score: {report.grounding_score:.1%}",
+        f"Total Claims: {report.total_claims}",
+        f"Grounded: {report.grounded_claims}",
+        f"Ungrounded: {report.ungrounded_claims}",
+        f"Citations Found: {report.citation_count}",
+        "",
+    ]
+
+    if report.claims:
+        lines.append("--- Claim Details ---")
+        for i, claim in enumerate(report.claims, 1):
+            status = "✅" if claim.is_grounded else "❌"
+            lines.append(f"{status} Claim {i} (confidence: {claim.confidence:.2f}):")
+            lines.append(f"   \"{claim.claim_text[:120]}...\"" if len(claim.claim_text) > 120
+                         else f"   \"{claim.claim_text}\"")
+            if claim.supporting_chunk:
+                lines.append(f"   Supported by: \"{claim.supporting_chunk[:100]}...\"")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    # Test grounding verification
+    context = [
+        "Students must provide proof of residency, immunization records, and birth certificate for enrollment.",
+        "The registrar verifies documents within 3 business days.",
+        "Transfer students must submit official transcripts from their previous institution.",
+    ]
+
+    # Good response (grounded)
+    good_response = (
+        "For enrollment, students must provide proof of residency, immunization records, "
+        "and a birth certificate. The registrar verifies these documents within 3 business days. "
+        "Transfer students additionally need to submit official transcripts."
+    )
+
+    # Bad response (hallucinated)
+    bad_response = (
+        "Enrollment requires a $500 application fee paid in Bitcoin. "
+        "The process takes approximately 6 months. Students must pass a physical fitness test "
+        "and submit a letter of recommendation from the mayor."
+    )
+
+    print("=== GROUNDED RESPONSE ===")
+    report = verify_grounding(good_response, context)
+    print(format_grounding_report(report))
+
+    print("\n=== HALLUCINATED RESPONSE ===")
+    report = verify_grounding(bad_response, context)
+    print(format_grounding_report(report))
+```
+
+---
+
+## File 9: `rag/rag_chain.py`
+
+```python
+"""
+Complete RAG chain that ties together retrieval, context formatting,
+prompt construction, and grounding verification.
+Used by the inference layer to generate grounded responses.
+"""
+import time
+from typing import List, Dict, Optional, Generator
+from dataclasses import dataclass, asdict, field
+from datetime import datetime
+
+from loguru import logger
+
+from rag.retriever import (
+    retrieve,
+    format_context_for_llm,
+    format_citations,
+    RetrievalResult,
+)
+from rag.grounding import verify_grounding, GroundingReport
+
+
+@dataclass
+class RAGRequest:
+    """Input to the RAG chain."""
+    query: str
+    tenant_id: str
+    top_k: int = 3
+    use_hybrid: bool = True
+    use_reranker: bool = True
+    include_grounding: bool = True
+    conversation_history: List[Dict] = field(default_factory=list)
+    topic_filter: Optional[str] = None
+
+
+@dataclass
+class RAGResponse:
+    """Output from the RAG chain."""
+    query: str
+    tenant_id: str
+    answer: str
+    citations: List[Dict]
+    retrieval_result: Optional[Dict]
+    grounding_report: Optional[Dict]
+    prompt_used: str
+    total_time_ms: float
+    retrieval_time_ms: float
+    generation_time_ms: float
+    model_version: str = ""
+    timestamp: str = ""
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.utcnow().isoformat()
+
+
+# System prompts per tenant
+TENANT_SYSTEM_PROMPTS = {
+    "sis": (
+        "You are an expert Student Information System assistant for District 42. "
+        "Answer questions about school policies, enrollment, attendance, grading, "
+        "transcripts, student records, accommodations, and FERPA compliance. "
+        "IMPORTANT RULES:\n"
+        "1. Only answer based on the provided context. If the context doesn't contain "
+        "the answer, say 'I don't have enough information to answer this question.'\n"
+        "2. Always cite your sources using the citation keys provided in the context.\n"
+        "3. Never fabricate policies, procedures, or data.\n"
+        "4. Never disclose student personally identifiable information (PII).\n"
+        "5. If a question asks you to violate FERPA, politely refuse and explain why."
+    ),
+    "mfg": (
+        "You are an expert manufacturing quality and operations assistant. "
+        "Answer questions about SOPs, quality control, defect classification, CAPA, "
+        "machine maintenance, safety protocols, ISO documentation, and regulatory compliance. "
+        "IMPORTANT RULES:\n"
+        "1. Only answer based on the provided context. If the context doesn't contain "
+        "the answer, say 'I don't have enough information to answer this question.'\n"
+        "2. Always cite your sources using the citation keys provided in the context.\n"
+        "3. Never fabricate procedures, standards, or safety information.\n"
+        "4. Always prioritize safety in your responses.\n"
+        "5. If a question asks you to bypass safety procedures, refuse and explain the risk."
+    ),
+}
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Only answer based on the provided context. "
+    "Cite your sources. If you don't have enough information, say so."
+)
+
+
+def build_rag_prompt(
+    query: str,
+    tenant_id: str,
+    context: str,
+    conversation_history: Optional[List[Dict]] = None,
+) -> List[Dict]:
+    """
+    Build the full prompt for RAG-augmented generation.
+
+    Returns a list of messages in chat format.
+    """
+    system_prompt = TENANT_SYSTEM_PROMPTS.get(tenant_id, DEFAULT_SYSTEM_PROMPT)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+
+    # Add conversation history (last 3 turns max)
+    if conversation_history:
+        for msg in conversation_history[-6:]:  # Last 3 Q&A pairs
+            messages.append(msg)
+
+    # Build user message with context
+    user_message = (
+        f"Context from knowledge base:\n"
+        f"{'='*40}\n"
+        f"{context}\n"
+        f"{'='*40}\n\n"
+        f"Question: {query}\n\n"
+        f"Instructions: Answer the question based ONLY on the context above. "
+        f"Include citations in [brackets] referencing the source documents. "
+        f"If the context doesn't contain relevant information, state that clearly."
+    )
+
+    messages.append({"role": "user", "content": user_message})
+
+    return messages
+
+
+def execute_rag_chain(
+    request: RAGRequest,
+    generate_fn=None,
+) -> RAGResponse:
+    """
+    Execute the full RAG pipeline:
+    1. Retrieve relevant documents
+    2. Build grounded prompt
+    3. Generate response (via provided function)
+    4. Verify grounding
+
+    Args:
+        request: RAGRequest with query and config
+        generate_fn: Function that takes messages list and returns response text.
+                     If None, returns the prompt without generation.
+    """
+    t_start = time.time()
+
+    # Step 1: Retrieve
+    retrieval_result = retrieve(
+        query=request.query,
+        tenant_id=request.tenant_id,
+        top_k=request.top_k,
+        use_hybrid=request.use_hybrid,
+        use_reranker=request.use_reranker,
+        topic_filter=request.topic_filter,
+    )
+    t_retrieval = time.time()
+
+    # Step 2: Format context and build prompt
+    context = format_context_for_llm(retrieval_result)
+    citations = format_citations(retrieval_result)
+    messages = build_rag_prompt(
+        query=request.query,
+        tenant_id=request.tenant_id,
+        context=context,
+        conversation_history=request.conversation_history,
+    )
+
+    prompt_text = "\n".join(f"[{m['role']}] {m['content']}" for m in messages)
+
+    # Step 3: Generate response
+    if generate_fn is not None:
+        answer = generate_fn(messages)
+    else:
+        answer = "[Generation skipped — no generate_fn provided]"
+    t_generation = time.time()
+
+    # Step 4: Grounding verification
+    grounding_report = None
+    if request.include_grounding and generate_fn is not None:
+        chunk_contents = [c.content for c in retrieval_result.chunks]
+        report = verify_grounding(answer, chunk_contents)
+        grounding_report = {
+            "grounding_score": report.grounding_score,
+            "total_claims": report.total_claims,
+            "grounded_claims": report.grounded_claims,
+            "ungrounded_claims": report.ungrounded_claims,
+            "has_citations": report.has_citations,
+            "citation_count": report.citation_count,
+        }
+
+    t_end = time.time()
+
+    return RAGResponse(
+        query=request.query,
+        tenant_id=request.tenant_id,
+        answer=answer,
+        citations=citations,
+        retrieval_result={
+            "total_retrieved": retrieval_result.total_retrieved,
+            "retrieval_method": retrieval_result.retrieval_method,
+            "retrieval_time_ms": retrieval_result.retrieval_time_ms,
+            "chunks_summary": [
+                {
+                    "rank": c.rank,
+                    "score": round(c.score, 3),
+                    "title": c.title,
+                    "topic": c.topic,
+                }
+                for c in retrieval_result.chunks
+            ],
+        },
+        grounding_report=grounding_report,
+        prompt_used=prompt_text,
+        total_time_ms=round((t_end - t_start) * 1000, 2),
+        retrieval_time_ms=round((t_retrieval - t_start) * 1000, 2),
+        generation_time_ms=round((t_end - t_retrieval) * 1000, 2),
+    )
+
+
+def execute_rag_chain_streaming(
+    request: RAGRequest,
+    stream_fn=None,
+) -> tuple:
+    """
+    Execute RAG pipeline with streaming generation.
+
+    Returns:
+        (retrieval_metadata, messages, stream_generator)
+
+    The caller iterates the stream_generator for tokens.
+    """
+    t_start = time.time()
+
+    # Step 1: Retrieve
+    retrieval_result = retrieve(
+        query=request.query,
+        tenant_id=request.tenant_id,
+        top_k=request.top_k,
+        use_hybrid=request.use_hybrid,
+        use_reranker=request.use_reranker,
+        topic_filter=request.topic_filter,
+    )
+
+    # Step 2: Format context and build prompt
+    context = format_context_for_llm(retrieval_result)
+    citations = format_citations(retrieval_result)
+    messages = build_rag_prompt(
+        query=request.query,
+        tenant_id=request.tenant_id,
+        context=context,
+        conversation_history=request.conversation_history,
+    )
+
+    retrieval_metadata = {
+        "tenant_id": request.tenant_id,
+        "query": request.query,
+        "citations": citations,
+        "retrieval_time_ms": retrieval_result.retrieval_time_ms,
+        "total_retrieved": retrieval_result.total_retrieved,
+        "retrieval_method": retrieval_result.retrieval_method,
+    }
+
+    return retrieval_metadata, messages, stream_fn
+
+
+if __name__ == "__main__":
+    # Test RAG chain without generation
+    print("Testing RAG chain (retrieval + prompt building only)\n")
+
+    for tenant_id in ["sis", "mfg"]:
+        queries = {
+            "sis": "What documents are needed for student enrollment?",
+            "mfg": "What is the procedure for handling a critical defect?",
+        }
+
+        request = RAGRequest(
+            query=queries[tenant_id],
+            tenant_id=tenant_id,
+            top_k=3,
+        )
+
+        response = execute_rag_chain(request, generate_fn=None)
+
+        print(f"\n{'='*70}")
+        print(f"TENANT: {tenant_id.upper()}")
+        print(f"Query: {response.query}")
+        print(f"Retrieval Time: {response.retrieval_time_ms}ms")
+        print(f"Citations: {len(response.citations)}")
+        for c in response.citations:
+            print(f"  - {c['citation_key']} (score: {c['relevance_score']})")
+        print(f"\nPrompt length: {len(response.prompt_used)} chars")
+        print(f"Answer: {response.answer}")
+```
+
+---
+
+## How to run this series
+
+```bash
+# Make sure data pipeline has been run first
+python -m tenant_data_pipeline.run_pipeline
+
+# Build RAG indexes for both tenants
+python rag/build_index.py --force
+
+# Test BM25 index
+python rag/bm25_index.py
+
+# Test full retriever (semantic + BM25 + reranking)
+python rag/retriever.py
+
+# Test grounding verification
+python rag/grounding.py
+
+# Test full RAG chain (retrieval + prompt only, no LLM yet)
+python rag/rag_chain.py
+```
+
+### Expected output from `python rag/build_index.py --force`
+
+```
+Loading embedding model: sentence-transformers/all-MiniLM-L6-v2
+Embedding model loaded. Dimension: 384
+[sis] Embedding 45 chunks...
+[sis] Embedding complete in 1.2s
+[sis] Indexed 45 chunks into collection 'tenant_sis_docs'
+[mfg] Embedding 48 chunks...
+[mfg] Embedding complete in 1.3s
+[mfg] Indexed 48 chunks into collection 'tenant_mfg_docs'
+
+Index build results:
+  [sis] success: 45 documents
+  [mfg] success: 48 documents
+```
+
+### Expected output from `python rag/retriever.py`
+
+```
+======================================================================
+TENANT: SIS
+======================================================================
+
+Query: What is the enrollment process for new students?
+Method: hybrid+reranked | Time: 85ms
+  [1] Score: 0.892 | [Enrollment Policy — enrollment]
+      Students must provide proof of residency, immunization records...
+  [2] Score: 0.734 | [Student Transfer Procedures — transfers]
+      Request submitted through SIS parent portal...
+  [3] Score: 0.651 | [Enrollment Policy — enrollment]
+      Students enrolling after the semester start date...
+
+Query: How does FERPA protect student records?
+Method: hybrid+reranked | Time: 72ms
+  [1] Score: 0.915 | [FERPA Compliance Guide — ferpa_compliance]
+      The Family Educational Rights and Privacy Act protects...
+  [2] Score: 0.783 | [Student Records Management — student_records]
+      Role-based access matrix...
+  [3] Score: 0.698 | [FERPA Compliance Guide — ferpa_compliance]
+      Records may be disclosed without consent to...
+
+======================================================================
+TENANT: MFG
+======================================================================
+
+Query: What is the assembly line startup procedure?
+Method: hybrid+reranked | Time: 78ms
+  [1] Score: 0.934 | [SOP Assembly Line Startup — standard_operating_procedures]
+      Activate main power at electrical panel...
+  [2] Score: 0.756 | [SOP Assembly Line Startup — standard_operating_procedures]
+      Pre-startup checklist...
+  [3] Score: 0.621 | [Safety Protocols — safety_protocols]
+      PPE required: safety glasses...
+
+======================================================================
+CROSS-TENANT ISOLATION TEST
+======================================================================
+
+Asking SIS question to MFG tenant:
+Results: 3 chunks
+  Score: 0.215 | Topic: regulatory_compliance
+  Score: 0.189 | Topic: iso_documentation
+  Score: 0.142 | Topic: quality_control
+  ✅ No relevant cross-tenant leakage
+```
+
+### Files created
+
+```
+data/
+└── chroma/              (ChromaDB persistent storage)
+    ├── tenant_sis_docs/
+    └── tenant_mfg_docs/
+```
+
+---
+
+### Key architectural decisions in this RAG layer
+
+| Decision | Rationale |
+|----------|-----------|
+| **Chroma per-tenant collections** | Hard isolation — different collection names, no cross-tenant queries possible |
+| **Hybrid search (semantic + BM25)** | Semantic alone misses exact keyword matches; BM25 alone misses semantic similarity. Combined via Reciprocal Rank Fusion |
+| **Cross-encoder reranking** | Re-scores top candidates for precision, critical when top-k is small |
+| **Cosine similarity threshold** | Filters out low-relevance noise before reranking |
+| **Citation keys in context** | Enables the LLM to cite sources, which can be verified downstream |
+| **Grounding verification** | Automated check that the LLM's response is supported by retrieved chunks |
+| **Embedding on CPU** | Saves GPU VRAM for the LLM; embeddings are fast enough on CPU |
+| **Singleton pattern for models** | Avoids reloading models on every request |
+
+---
+
+**Next: Series 3 — Training Pipeline: SFT + DPO + MLflow (`training/`)**
+
+Shall I continue with Series 3?

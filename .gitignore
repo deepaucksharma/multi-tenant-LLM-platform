@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Env
+.env
+*.env.local
+
+# Data (generated)
+data/chroma/
+data/raw/
+data/sis/
+data/mfg/
+
+# Models (large binary artifacts)
+models/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Logs
+logs/
+*.log
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.npm
+
+# Flutter
+mobile_app/.dart_tool/
+mobile_app/build/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+
+# Evaluation reports (generated)
+evaluation/reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

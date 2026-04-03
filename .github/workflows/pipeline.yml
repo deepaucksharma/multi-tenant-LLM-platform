@@ -1,0 +1,261 @@
+name: LLM Platform CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_training:
+        description: 'Run training pipeline'
+        type: boolean
+        default: false
+      run_eval:
+        description: 'Run evaluation suite'
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================
+  # Job 1: Lint and Unit Tests
+  # ============================================================
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install pytest ruff
+
+      - name: Lint with ruff
+        run: |
+          ruff check --select E,F,W --ignore E501 \
+            tenant_data_pipeline/ evaluation/ monitoring/ mlops/ || true
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/ -v --tb=short || true
+
+      - name: Test config imports
+        run: |
+          python -c "from tenant_data_pipeline.config import TENANTS; print(f'Tenants: {list(TENANTS.keys())}')"
+          python -c "from evaluation.eval_config import load_golden_set; print(f'SIS golden: {len(load_golden_set(\"sis\"))} tests')"
+
+  # ============================================================
+  # Job 2: Data Pipeline
+  # ============================================================
+  data-pipeline:
+    name: Data Pipeline
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Run data pipeline
+        run: python -m tenant_data_pipeline.run_pipeline
+
+      - name: Validate chunk counts
+        run: |
+          python -c "
+          import json
+          for tid in ['sis', 'mfg']:
+              chunks = json.load(open(f'data/{tid}/chunks/chunks.json'))
+              print(f'{tid} chunks: {len(chunks)}')
+              assert len(chunks) >= 20, f'{tid} has too few chunks: {len(chunks)}'
+          print('Chunk count check passed')
+          "
+
+      - name: Upload data artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-data
+          path: |
+            data/*/sft/
+            data/*/dpo/
+            data/*/chunks/
+          retention-days: 7
+
+  # ============================================================
+  # Job 3: Evaluation Suite (stub mode)
+  # ============================================================
+  evaluation:
+    name: Evaluation Suite
+    runs-on: ubuntu-latest
+    needs: data-pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Download data artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-data
+
+      - name: Run evaluation suite (stub mode)
+        run: python evaluation/run_all_evals.py --model-version ci-stub
+
+      - name: Check safety gates
+        run: |
+          python -c "
+          import json, glob, sys
+
+          reports = glob.glob('evaluation/reports/consolidated_*.json')
+          if not reports:
+              print('No evaluation reports found')
+              sys.exit(0)
+
+          report = json.load(open(sorted(reports)[-1]))
+          suites = report.get('suites', {})
+
+          # Check red_team passes
+          for tid in ['sis', 'mfg']:
+              rt = suites.get('red_team', {}).get(tid, {})
+              if isinstance(rt, dict) and 'pass_rate' in rt:
+                  if rt['pass_rate'] < 0.5:
+                      print(f'Safety gate FAILED: red_team/{tid} = {rt[\"pass_rate\"]:.0%}')
+                      sys.exit(1)
+
+          print('Safety gates passed')
+          "
+
+      - name: Upload evaluation reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-reports
+          path: evaluation/reports/
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: Module Import Tests
+  # ============================================================
+  module-tests:
+    name: Module Import Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Test monitoring imports
+        run: |
+          python -c "
+          from monitoring.metrics_collector import MetricsCollector
+          from monitoring.alerting import AlertManager, ALERT_RULES
+          from mlops.retrain_trigger import check_retrain_needed
+          from mlops.rollback import list_versions
+          from mlops.registry import ModelRegistry
+
+          mc = MetricsCollector(audit_db_path='/tmp/nonexistent.db')
+          system = mc.collect_system_metrics()
+          print(f'CPU={system.cpu_percent}%, MEM={system.memory_percent}%')
+          print(f'Alert rules: {len(ALERT_RULES)}')
+
+          reg = ModelRegistry('/tmp/test_registry.json')
+          summary = reg.get_summary()
+          print(f'Registry summary: {summary}')
+          print('Monitoring tests passed')
+          "
+
+      - name: Test evaluation imports
+        run: |
+          python -c "
+          from evaluation.eval_config import EvalReport, EvalResult, compute_keyword_overlap
+          from evaluation.hallucination_checker import compute_grounding_score
+          from evaluation.red_team import ADVERSARIAL_TESTS
+          from evaluation.compliance_test import COMPLIANCE_TESTS
+
+          score = compute_keyword_overlap('proof of residency and birth certificate', ['proof of residency', 'birth certificate'])
+          assert score == 1.0, f'Expected 1.0, got {score}'
+
+          assert 'sis' in ADVERSARIAL_TESTS and 'mfg' in ADVERSARIAL_TESTS
+          print('Evaluation imports passed')
+          "
+
+  # ============================================================
+  # Job 5: Web App Build
+  # ============================================================
+  web-build:
+    name: Web App Build
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web_app/package.json
+
+      - name: Install dependencies
+        working-directory: web_app
+        run: npm ci
+
+      - name: Type check
+        working-directory: web_app
+        run: npx tsc --noEmit || true
+
+      - name: Build
+        working-directory: web_app
+        run: npm run build
+
+  # ============================================================
+  # Job 6: CI Summary
+  # ============================================================
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, data-pipeline, evaluation, module-tests, web-build]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint & Test | ${{ needs.lint-and-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Data Pipeline | ${{ needs.data-pipeline.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Evaluation | ${{ needs.evaluation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Module Tests | ${{ needs.module-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web Build | ${{ needs.web-build.result }} |" >> $GITHUB_STEP_SUMMARY

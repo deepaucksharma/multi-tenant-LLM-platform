@@ -1,0 +1,132 @@
+You have the complete codebase and architecture. Since you are asking for the next step, I am going to give you the **Enterprise Polish & Execution Plan**. 
+
+To truly prove you fit this Senior/Lead role, you need to show how this code lives in a real engineering environment. That means **CI/CD** and a structured **Presentation Deck**.
+
+Here is **Series 7: CI/CD, the 14-Day Build Plan, and the Pitch Deck.**
+
+---
+
+# 1. The CI/CD Pipeline (GitHub Actions)
+
+In the enterprise, code doesn't just run on your desktop. You need to show that your evaluation and safety tests run automatically when someone opens a Pull Request.
+
+Create this file in your repo at `.github/workflows/ci.yml`.
+
+```yaml
+name: Multi-Tenant LLM CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest requests pandas scikit-learn
+          # We mock the heavy ML libraries for CI speed in this POC
+          pip install -r requirements-ci.txt 
+
+      - name: Run Unit Tests
+        run: |
+          echo "Running unit tests for routing and data pipeline..."
+          pytest tests/
+
+      - name: Run Data Quality Checks
+        run: |
+          echo "Verifying no PII exists in processed datasets..."
+          python pipeline/quality_report.py --ci-mode
+
+      - name: Run Safety & Leakage Gates
+        run: |
+          echo "Executing Red Team and Tenant-Leakage prompts against staging API..."
+          # In a real pipeline, this spins up a test container and hits it.
+          # python evaluation/safety_test.py
+
+      - name: Model Registry Mock
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "Merging adapter weights and pushing to Model Registry..."
+          echo "Deploying Canary version to Staging via Kubernetes..."
+```
+
+**Why this matters:** Even if the GitHub Action just runs basic Python assertions and prints echoes for the heavy ML stuff (because GitHub runners don't have GPUs), having this YAML file in your repo proves you think like an **MLOps Engineer**, not just a notebook researcher.
+
+---
+
+# 2. Your 14-Day Sprint Plan
+
+If you have a day job, you need to build this efficiently. Follow this schedule to finish the POC in exactly two weeks.
+
+### **Week 1: Data, Infrastructure, and Base Training**
+*   **Day 1 (Sat):** Setup your environment. Create the virtual environment, install packages, and ensure `Qwen2.5-1.5B-Instruct` downloads successfully.
+*   **Day 2 (Sun):** Generate the synthetic documents for SIS and MFG. Run the `ingest`, `clean`, and `chunk` scripts. Verify your data looks good.
+*   **Day 3 (Mon):** Run `build_sft.py` and `build_dpo.py`. Manually curate 20 really good examples for each tenant. 
+*   **Day 4 (Tue):** **Training Day.** Run the `train_sft.py` for the SIS adapter. Watch the VRAM usage.
+*   **Day 5 (Wed):** Run the `train_sft.py` for the MFG adapter. 
+*   **Day 6 (Thu):** Setup MLflow. Verify both adapters show up in your local MLflow dashboard and are saved in your `models/adapters` folder.
+*   **Day 7 (Fri):** Build the Chroma vector indexes (`rag/build_index.py`). 
+
+### **Week 2: Inference, Application, and Polish**
+*   **Day 8 (Sat):** Build the FastAPI server. Implement the dynamic adapter swapping (`model_manager.py`). Test it with `curl` or Postman.
+*   **Day 9 (Sun):** Connect the RAG retriever to the FastAPI server. Ensure citations are returning in the API response.
+*   **Day 10 (Mon):** Build the Streamlit Web UI. Test streaming and tenant switching.
+*   **Day 11 (Tue):** Build the Python Voice script. Test the mic -> Whisper -> LLM -> TTS pipeline.
+*   **Day 12 (Wed):** Run the Evaluation scripts. Generate the `safety_tests` and ROUGE score reports.
+*   **Day 13 (Thu):** Build the Streamlit Observability Dashboard reading from the SQLite audit log. 
+*   **Day 14 (Fri):** Record a 3-minute video of the demo working perfectly (as a backup in case live demo fails during the interview). Prepare your pitch deck.
+
+---
+
+# 3. The Interview Pitch Deck (5 Slides)
+
+Do not just share your screen and look at code. Create a 5-slide presentation to control the narrative. 
+
+**Slide 1: The Challenge**
+*   **Title:** Building Scalable, Compliant Multi-Tenant AI.
+*   **Bullet points:** Serving custom LLMs to different verticals (Education vs. Manufacturing) usually requires expensive redundant infrastructure. Strict data boundaries and compliance (FERPA, ISO) are mandatory.
+
+**Slide 2: The Architecture**
+*   **Visual:** Put your architecture diagram here (FastAPI -> Router -> Base Model + 2 LoRAs -> 2 Chroma DBs).
+*   **Bullet points:** Parameter-Efficient Fine-Tuning (PEFT) allows 1 base model to serve N tenants. RAG provides isolated, cited context.
+
+**Slide 3: The Data & Evaluation Pipeline**
+*   **Visual:** Screenshot of your Data Quality Report and MLflow dashboard.
+*   **Bullet points:** Automated PII redaction. Deterministic SFT/DPO generation. Automated regression and safety testing.
+
+**Slide 4: Live Demo (The "Wow" Moment)**
+*   *Stop sharing the deck.*
+*   Share your screen. Show the Streamlit Web App.
+*   Switch to SIS -> ask a question -> show FERPA refusal.
+*   Switch to MFG -> ask a question -> show SOP citation.
+*   Show the MLOps Dashboard tracking the latency and canary splits.
+
+**Slide 5: Production Roadmap (What you'd do with real budget)**
+*   **Title:** Scaling to Enterprise.
+*   **Bullet points:** 
+    *   Migrate FastAPI to **vLLM** for continuous batching and high throughput.
+    *   Migrate SQLite to **PostgreSQL/pgvector**.
+    *   Migrate local training scripts to **Kubernetes/Ray** or **AWS SageMaker**.
+    *   Implement full **RLHF/PPO** instead of DPO-lite for complex reasoning alignment.
+
+---
+
+### Final Check
+You now possess the complete end-to-end framework, from raw text ingestion all the way to the final slide of your interview presentation. 
+
+If you are ready, **close this chat, open your terminal, and start coding Day 1.** 
+
+If you run into specific Python tracebacks or CUDA errors while building, start a new chat with the error message and I will help you bypass it. You've got this!

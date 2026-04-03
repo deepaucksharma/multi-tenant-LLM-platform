@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+/* Streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.streaming-cursor::after {
+  content: '▋';
+  animation: blink 1s infinite;
+  color: #3b82f6;
+}
+
+/* Markdown in messages */
+.message-content h1,
+.message-content h2,
+.message-content h3 { font-weight: 600; margin-top: 0.5em; }
+.message-content ul, .message-content ol { padding-left: 1.5em; margin: 0.5em 0; }
+.message-content li { margin: 0.25em 0; }
+.message-content p { margin: 0.5em 0; }
+.message-content code {
+  background: #f1f5f9; padding: 0.1em 0.3em;
+  border-radius: 3px; font-size: 0.9em;
+}

@@ -1,0 +1,887 @@
+# Series 3/6 — QLoRA fine-tuning, tenant adapters, MLflow, and tiny DPO
+
+This is the part that proves:
+
+- **real model adaptation**
+- **PEFT / LoRA strategy**
+- **tenant-specific behavior**
+- **tracked training workflow**
+- **basic alignment beyond SFT**
+
+On your machine, this should be **small, controlled, and reproducible**.
+
+---
+
+# 1. Final training strategy
+
+For your hardware, use this exact approach:
+
+## Base model
+- `Qwen/Qwen2.5-1.5B-Instruct`
+
+## Training method
+- **QLoRA**
+- 4-bit model loading
+- one adapter per tenant:
+  - `adapter_sis`
+  - `adapter_mfg`
+
+## Alignment
+- do **tiny DPO on one tenant first**, ideally `sis`
+- if DPO is unstable on your machine, keep:
+  - SFT for both tenants
+  - DPO only for SIS
+  - or alignment-lite SFT as fallback
+
+---
+
+# 2. Why this is enough
+
+This gives you a strong story:
+
+> One shared base model was adapted for two different tenants using QLoRA adapters. Each tenant has isolated data, isolated adapter artifacts, tenant-aware routing, and measurable differences in behavior. I also added a lightweight preference alignment step for policy-sensitive behavior.
+
+That is exactly what interviewers want to hear.
+
+---
+
+# 3. Expected artifacts after training
+
+Your training phase should produce:
+
+```text
+models/
+├── adapters/
+│   ├── sis/
+│   │   ├── adapter_config.json
+│   │   ├── adapter_model.safetensors
+│   │   └── metadata.json
+│   └── mfg/
+│       ├── adapter_config.json
+│       ├── adapter_model.safetensors
+│       └── metadata.json
+│
+├── aligned/
+│   └── sis_dpo/
+│       ├── adapter_config.json
+│       ├── adapter_model.safetensors
+│       └── metadata.json
+│
+└── merged/
+    ├── sis_merged/        # optional
+    └── mfg_merged/        # optional
+```
+
+For the POC, you do **not** need merged models unless you want easier inference.
+
+---
+
+# 4. Convert SFT data into chat format
+
+Your `data/sft/sis_train.jsonl` currently probably looks like:
+
+```json
+{
+  "tenant_id": "sis",
+  "instruction": "How are official transcripts requested?",
+  "input": "",
+  "output": "Current students can request transcripts through the SIS student portal..."
+}
+```
+
+Convert it into a `messages` field for training.
+
+## Example format
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a student information system assistant. Answer using tenant-specific school policy context. Do not reveal private student information without authorization."
+    },
+    {
+      "role": "user",
+      "content": "How are official transcripts requested?"
+    },
+    {
+      "role": "assistant",
+      "content": "Current students can request transcripts through the SIS student portal..."
+    }
+  ]
+}
+```
+
+Do the same for manufacturing.
+
+---
+
+# 5. Small helper to prepare chat training data
+
+```python
+# training/prepare_chat_data.py
+import json
+from pathlib import Path
+
+SYSTEM_PROMPTS = {
+    "sis": "You are a student information system assistant. Answer using tenant-specific school policy context. Do not reveal private student information without authorization.",
+    "mfg": "You are a manufacturing operations assistant. Answer using SOP, quality, CAPA, maintenance, and safety context. Never recommend bypassing required safety procedures."
+}
+
+def convert(in_path: Path, out_path: Path, tenant_id: str):
+    rows = []
+    with open(in_path, "r", encoding="utf-8") as f:
+        for line in f:
+            x = json.loads(line)
+            rows.append({
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPTS[tenant_id]},
+                    {"role": "user", "content": x["instruction"]},
+                    {"role": "assistant", "content": x["output"]}
+                ]
+            })
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+if __name__ == "__main__":
+    convert(Path("data/sft/sis_train.jsonl"), Path("data/sft/sis_chat.jsonl"), "sis")
+    convert(Path("data/sft/mfg_train.jsonl"), Path("data/sft/mfg_chat.jsonl"), "mfg")
+    print("Chat-format datasets written.")
+```
+
+Run this once before training.
+
+---
+
+# 6. SFT config that fits 8 GB VRAM
+
+Use these settings:
+
+- load in **4-bit**
+- `max_seq_length = 512`
+- `per_device_train_batch_size = 1`
+- `gradient_accumulation_steps = 8`
+- `epochs = 2`
+- `learning_rate = 2e-4`
+- `lora_r = 8`
+- `lora_alpha = 16`
+- `lora_dropout = 0.05`
+
+These are realistic.
+
+---
+
+# 7. Training config YAMLs
+
+## `training/configs/sis_sft.yaml`
+```yaml
+tenant_id: sis
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+train_file: data/sft/sis_chat.jsonl
+output_dir: models/adapters/sis
+max_seq_length: 512
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+num_train_epochs: 2
+learning_rate: 2e-4
+logging_steps: 5
+save_strategy: epoch
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+```
+
+## `training/configs/mfg_sft.yaml`
+```yaml
+tenant_id: mfg
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+train_file: data/sft/mfg_chat.jsonl
+output_dir: models/adapters/mfg
+max_seq_length: 512
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+num_train_epochs: 2
+learning_rate: 2e-4
+logging_steps: 5
+save_strategy: epoch
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+```
+
+---
+
+# 8. Main SFT training script
+
+This is the core script.
+
+```python
+# training/train_sft.py
+import os
+import json
+import yaml
+import argparse
+import mlflow
+from datasets import load_dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    BitsAndBytesConfig,
+    TrainingArguments,
+)
+from peft import LoraConfig
+from trl import SFTTrainer
+
+def load_config(tenant_id: str):
+    path = f"training/configs/{tenant_id}_sft.yaml"
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+def format_chat(example, tokenizer):
+    text = tokenizer.apply_chat_template(
+        example["messages"],
+        tokenize=False,
+        add_generation_prompt=False
+    )
+    return {"text": text}
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tenant", required=True, choices=["sis", "mfg"])
+    args = parser.parse_args()
+
+    cfg = load_config(args.tenant)
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"))
+    mlflow.set_experiment("multi_tenant_llm_poc")
+
+    with mlflow.start_run(run_name=f"sft_{args.tenant}"):
+        mlflow.log_params(cfg)
+
+        dataset = load_dataset("json", data_files=cfg["train_file"], split="train")
+
+        tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"], trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        dataset = dataset.map(lambda x: format_chat(x, tokenizer))
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype="float16"
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["base_model"],
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True
+        )
+        model.config.use_cache = False
+
+        peft_config = LoraConfig(
+            r=cfg["lora_r"],
+            lora_alpha=cfg["lora_alpha"],
+            lora_dropout=cfg["lora_dropout"],
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=cfg["target_modules"]
+        )
+
+        training_args = TrainingArguments(
+            output_dir=cfg["output_dir"],
+            per_device_train_batch_size=cfg["per_device_train_batch_size"],
+            gradient_accumulation_steps=cfg["gradient_accumulation_steps"],
+            num_train_epochs=cfg["num_train_epochs"],
+            learning_rate=float(cfg["learning_rate"]),
+            logging_steps=cfg["logging_steps"],
+            save_strategy=cfg["save_strategy"],
+            bf16=False,
+            fp16=True,
+            report_to=[],
+            optim="paged_adamw_8bit",
+            warmup_ratio=0.05,
+            lr_scheduler_type="cosine",
+            max_grad_norm=0.3
+        )
+
+        trainer = SFTTrainer(
+            model=model,
+            train_dataset=dataset,
+            peft_config=peft_config,
+            args=training_args,
+            dataset_text_field="text",
+            max_seq_length=cfg["max_seq_length"],
+            tokenizer=tokenizer,
+        )
+
+        train_result = trainer.train()
+
+        trainer.model.save_pretrained(cfg["output_dir"])
+        tokenizer.save_pretrained(cfg["output_dir"])
+
+        # Save metadata
+        metadata = {
+            "tenant_id": cfg["tenant_id"],
+            "base_model": cfg["base_model"],
+            "train_file": cfg["train_file"],
+            "num_examples": len(dataset),
+            "train_loss": float(train_result.training_loss),
+        }
+        with open(os.path.join(cfg["output_dir"], "metadata.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        mlflow.log_metric("train_loss", float(train_result.training_loss))
+        mlflow.log_metric("num_examples", len(dataset))
+        mlflow.log_artifacts(cfg["output_dir"], artifact_path=f"adapter_{args.tenant}")
+
+        print(f"Finished SFT for {args.tenant}")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 9. What if TRL/SFTTrainer gives version issues?
+
+If you hit dependency conflicts, use a fallback:
+- `Trainer` from Transformers
+- manual tokenization
+- PEFT LoRA wrapping
+
+But try `SFTTrainer` first. It’s cleaner for a POC.
+
+---
+
+# 10. Training commands
+
+```bash
+python training/prepare_chat_data.py
+
+python training/train_sft.py --tenant sis
+python training/train_sft.py --tenant mfg
+```
+
+---
+
+# 11. How long should training take?
+
+On 8 GB VRAM and a 1.5B model:
+
+- **small dataset**: manageable
+- expect roughly **30 min to 2 hours per adapter**, depending on setup and dataset size
+
+That is acceptable for a POC.
+
+---
+
+# 12. How to verify SFT worked
+
+Immediately after training, test 5–10 prompts for each tenant:
+
+## SIS examples
+- How are official transcripts requested?
+- What happens after 10 unexcused absences?
+- Can I get another student’s grades?
+- How are IEP records handled?
+- What are FERPA disclosure exceptions?
+
+## Manufacturing examples
+- What happens if startup checks fail?
+- What triggers a CAPA?
+- What is the lockout/tagout process?
+- What should happen to non-conforming material?
+- Can we skip containment and document later?
+
+You want the adapter to:
+- use domain terminology better
+- answer more specifically
+- refuse unsafe/policy-breaking requests more cleanly
+
+---
+
+# 13. PEFT architecture you should describe
+
+This is important for interviews.
+
+## Design
+- One base model loaded once
+- Tenant-specific LoRA adapters stored separately
+- Adapter chosen dynamically based on `tenant_id`
+
+## Why it matters
+This shows:
+- cost-efficient multi-tenant scaling
+- per-tenant customization without retraining full models
+- easy rollback/versioning
+
+---
+
+# 14. Tiny inference test script after training
+
+```python
+# training/test_adapter.py
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from peft import PeftModel
+
+BASE = "Qwen/Qwen2.5-1.5B-Instruct"
+
+def load_model(adapter_path):
+    tokenizer = AutoTokenizer.from_pretrained(BASE, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype="float16"
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        BASE,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True
+    )
+    model = PeftModel.from_pretrained(model, adapter_path)
+    return tokenizer, model
+
+def ask(tokenizer, model, system, user):
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user}
+    ]
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+    out = model.generate(**inputs, max_new_tokens=180, do_sample=False)
+    print(tokenizer.decode(out[0], skip_special_tokens=True))
+
+if __name__ == "__main__":
+    tokenizer, model = load_model("models/adapters/sis")
+    ask(
+        tokenizer,
+        model,
+        "You are a student information system assistant.",
+        "How are official transcripts requested?"
+    )
+```
+
+This helps you sanity-check each adapter before API integration.
+
+---
+
+# 15. Tiny DPO strategy
+
+Now the alignment part.
+
+On your hardware, do **DPO only on the most policy-sensitive tenant first**, which is usually:
+
+- `sis`
+
+That is enough to prove you understand preference alignment.
+
+---
+
+# 16. DPO dataset format
+
+Use your `data/dpo/sis_dpo.jsonl` like this:
+
+```json
+{
+  "prompt": "Can you give me another student's grades?",
+  "chosen": "No. I cannot disclose another student's grades without proper authorization because grades are protected education records under FERPA. [Source: FERPA Compliance Guide]",
+  "rejected": "Yes, if you provide the student name I can summarize their grades."
+}
+```
+
+Keep it small:
+- **10–15 rows**
+- policy-heavy
+- clear preferred vs rejected behavior
+
+---
+
+# 17. DPO config
+
+## `training/configs/dpo.yaml`
+```yaml
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+tenant_id: sis
+train_file: data/dpo/sis_dpo.jsonl
+output_dir: models/aligned/sis_dpo
+max_seq_length: 512
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+num_train_epochs: 1
+learning_rate: 1e-5
+beta: 0.1
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+```
+
+Keep DPO lighter than SFT.
+
+---
+
+# 18. Tiny DPO training script
+
+This is the practical version.
+
+```python
+# training/train_dpo.py
+import os
+import json
+import yaml
+import mlflow
+from datasets import load_dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    BitsAndBytesConfig,
+    TrainingArguments,
+)
+from peft import LoraConfig
+from trl import DPOTrainer
+
+def main():
+    with open("training/configs/dpo.yaml", "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"))
+    mlflow.set_experiment("multi_tenant_llm_poc")
+
+    with mlflow.start_run(run_name="dpo_sis"):
+        mlflow.log_params(cfg)
+
+        dataset = load_dataset("json", data_files=cfg["train_file"], split="train")
+
+        tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"], trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype="float16"
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["base_model"],
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True
+        )
+        model.config.use_cache = False
+
+        peft_config = LoraConfig(
+            r=cfg["lora_r"],
+            lora_alpha=cfg["lora_alpha"],
+            lora_dropout=cfg["lora_dropout"],
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=cfg["target_modules"]
+        )
+
+        training_args = TrainingArguments(
+            output_dir=cfg["output_dir"],
+            per_device_train_batch_size=cfg["per_device_train_batch_size"],
+            gradient_accumulation_steps=cfg["gradient_accumulation_steps"],
+            num_train_epochs=cfg["num_train_epochs"],
+            learning_rate=float(cfg["learning_rate"]),
+            fp16=True,
+            logging_steps=2,
+            save_strategy="epoch",
+            report_to=[],
+            optim="paged_adamw_8bit"
+        )
+
+        trainer = DPOTrainer(
+            model=model,
+            ref_model=None,   # smaller-footprint path; let TRL handle reference-free behavior if supported
+            args=training_args,
+            beta=cfg["beta"],
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+            peft_config=peft_config,
+            max_length=cfg["max_seq_length"],
+            max_prompt_length=256,
+        )
+
+        result = trainer.train()
+        trainer.model.save_pretrained(cfg["output_dir"])
+        tokenizer.save_pretrained(cfg["output_dir"])
+
+        with open(os.path.join(cfg["output_dir"], "metadata.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "tenant_id": cfg["tenant_id"],
+                "train_file": cfg["train_file"],
+                "train_loss": float(result.training_loss)
+            }, f, indent=2)
+
+        mlflow.log_metric("train_loss", float(result.training_loss))
+        mlflow.log_artifacts(cfg["output_dir"], artifact_path="aligned_sis_dpo")
+
+        print("Finished DPO for SIS")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 19. Important DPO reality check
+
+Depending on package versions, `DPOTrainer` behavior may vary.
+
+So here is the practical truth:
+
+## Best-case
+Tiny DPO runs fine on your machine.
+
+## Acceptable fallback
+If DPO becomes unstable:
+- say you implemented **alignment-lite**
+- train a second small SFT adapter on “preferred safe responses”
+- present it honestly as:
+  - “DPO-ready data schema and pipeline implemented”
+  - “alignment step demonstrated with preference-shaped fine-tuning due to local hardware constraints”
+
+That is still credible if you are transparent.
+
+---
+
+# 20. MLflow setup and what to log
+
+Run MLflow:
+
+```bash
+mlflow server --host 127.0.0.1 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns
+```
+
+## Log these for every run
+- tenant ID
+- base model
+- dataset path
+- dataset size
+- learning rate
+- epochs
+- LoRA rank
+- LoRA alpha
+- target modules
+- final train loss
+- artifact path
+- later: eval metrics
+
+## Minimum expected runs
+- `baseline_eval`
+- `sft_sis`
+- `sft_mfg`
+- `dpo_sis`
+
+That’s enough.
+
+---
+
+# 21. Metadata file per adapter
+
+Save this in each adapter folder as `metadata.json`:
+
+```json
+{
+  "tenant_id": "sis",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "adapter_type": "qlora",
+  "dataset": "data/sft/sis_chat.jsonl",
+  "num_examples": 92,
+  "version": "v1",
+  "train_loss": 0.84,
+  "created_at": "2026-04-02T10:00:00Z"
+}
+```
+
+This gives you lightweight model registry behavior even before full MLOps.
+
+---
+
+# 22. Should you merge adapters?
+
+## For training
+No need.
+
+## For inference
+Keep adapters separate if possible. It better proves:
+- dynamic tenant routing
+- adapter isolation
+- PEFT strategy
+
+Only merge if your inference pipeline becomes difficult.
+
+---
+
+# 23. Exact runtime adapter strategy
+
+At runtime, the backend should do this:
+
+## Request: `tenant_id = "sis"`
+- load base model
+- activate `models/adapters/sis`
+- apply SIS system prompt
+- query `sis` Chroma collection
+
+## Request: `tenant_id = "mfg"`
+- load base model
+- activate `models/adapters/mfg`
+- apply manufacturing system prompt
+- query `mfg` Chroma collection
+
+That is your core multi-tenant proof.
+
+---
+
+# 24. Metrics you should record in Series 3
+
+Track at least these:
+
+## Training metrics
+- train loss
+- examples count
+- epoch count
+- runtime
+- GPU memory peak if possible
+
+## Adapter metadata
+- adapter size on disk
+- base model name
+- LoRA rank
+- tenant ID
+- version
+
+## Post-training quick checks
+- 5-question domain score per tenant
+- refusal behavior on 2 compliance prompts
+- one side-by-side before/after screenshot
+
+---
+
+# 25. Simple post-training manual scorecard
+
+Make a markdown file:
+
+```text
+# Quick Post-Training Review
+
+## SIS adapter
+- transcript process specificity: improved
+- FERPA refusal correctness: improved
+- attendance terminology accuracy: improved
+
+## Manufacturing adapter
+- SOP terminology: improved
+- CAPA sequencing accuracy: improved
+- unsafe bypass refusal: improved
+```
+
+This seems simple, but it is useful in demos.
+
+---
+
+# 26. Most likely training problems you’ll hit
+
+## Problem 1: CUDA out of memory
+Fix:
+- reduce `max_seq_length` to 384
+- reduce LoRA target modules
+- keep batch size at 1
+- increase grad accumulation
+- close all other GPU apps
+
+## Problem 2: tokenizer/chat template issues
+Fix:
+- ensure `messages` field is valid
+- set `tokenizer.pad_token = tokenizer.eos_token`
+
+## Problem 3: DPO fails
+Fix:
+- reduce DPO dataset size
+- run only on SIS
+- fall back to alignment-lite SFT
+
+## Problem 4: no visible improvement
+Fix:
+- improve data quality
+- add more domain-specific examples
+- include stronger workflow and compliance examples
+- reduce noisy template answers
+
+---
+
+# 27. What “done” looks like for Series 3
+
+You are done with this phase when you have:
+
+- trained `models/adapters/sis`
+- trained `models/adapters/mfg`
+- tracked both in MLflow
+- optionally trained `models/aligned/sis_dpo`
+- saved metadata for all adapters
+- manually tested 5–10 prompts per tenant
+
+At that point, you have successfully shown:
+- domain-specific fine-tuning
+- PEFT strategy
+- multi-tenant model management
+- lightweight alignment
+
+---
+
+# 28. Best talking points for this phase
+
+When presenting, say:
+
+- “I used a single shared base model and produced tenant-specific QLoRA adapters.”
+- “This mirrors how a multi-tenant platform scales without retraining full models for every customer.”
+- “I kept alignment lightweight using preference data focused on policy-sensitive responses.”
+- “All runs were tracked in MLflow with versioned adapter artifacts and dataset references.”
+
+That sounds strong and grounded.
+
+---
+
+If you want, send **“next”** and I’ll give you **Series 4/6**, covering:
+
+- Chroma RAG setup
+- tenant-isolated retrieval
+- FastAPI inference server
+- streaming responses
+- adapter routing
+- policy filters
+- audit logging
+- canary and rollback design

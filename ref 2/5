@@ -1,0 +1,1993 @@
+
+
+# Series 5 of 10: Inference Gateway with Tenant-Aware Routing (`inference/`)
+
+This covers the FastAPI inference server, tenant-aware model routing, adapter hot-swapping, streaming SSE responses, request/response audit logging, canary deployment, authentication, and the complete API schema.
+
+---
+
+## File 1: `inference/__init__.py`
+
+```python
+"""Inference gateway for multi-tenant LLM serving."""
+```
+
+---
+
+## File 2: `inference/schemas.py`
+
+```python
+"""
+Pydantic schemas for the inference API.
+Defines request/response models for all endpoints.
+"""
+from pydantic import BaseModel, Field
+from typing import List, Dict, Optional, Any
+from datetime import datetime
+from enum import Enum
+
+
+class TenantID(str, Enum):
+    SIS = "sis"
+    MFG = "mfg"
+
+
+class ModelType(str, Enum):
+    BASE = "base"
+    SFT = "sft"
+    DPO = "dpo"
+
+
+# ---- Chat ----
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="Message role: system, user, assistant")
+    content: str = Field(..., description="Message content")
+
+
+class ChatRequest(BaseModel):
+    tenant_id: TenantID = Field(..., description="Tenant identifier")
+    message: str = Field(..., description="User message")
+    conversation_history: List[ChatMessage] = Field(
+        default_factory=list, description="Previous conversation turns"
+    )
+    use_rag: bool = Field(default=True, description="Whether to use RAG retrieval")
+    use_streaming: bool = Field(default=True, description="Whether to stream response")
+    model_type: ModelType = Field(default=ModelType.SFT, description="Model variant to use")
+    max_new_tokens: int = Field(default=512, ge=1, le=2048)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0)
+    topic_filter: Optional[str] = Field(default=None, description="Optional topic filter for RAG")
+
+
+class Citation(BaseModel):
+    title: str
+    topic: str
+    source_file: str
+    relevance_score: float
+    citation_key: str
+
+
+class ChatResponse(BaseModel):
+    tenant_id: str
+    message: str
+    citations: List[Citation] = Field(default_factory=list)
+    model_version: str = ""
+    model_type: str = ""
+    retrieval_method: str = ""
+    grounding_score: Optional[float] = None
+    latency_ms: float = 0.0
+    retrieval_time_ms: float = 0.0
+    generation_time_ms: float = 0.0
+    request_id: str = ""
+    timestamp: str = ""
+
+
+class StreamChunk(BaseModel):
+    """SSE stream chunk."""
+    token: str = ""
+    done: bool = False
+    metadata: Optional[Dict[str, Any]] = None
+
+
+# ---- Feedback ----
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(..., description="Original request ID")
+    tenant_id: TenantID
+    rating: int = Field(..., ge=1, le=5, description="1=bad, 5=great")
+    feedback_type: str = Field(default="thumbs", description="thumbs, detailed, flag")
+    comment: Optional[str] = None
+    flagged_issues: List[str] = Field(
+        default_factory=list,
+        description="Issues: hallucination, wrong_domain, unsafe, unhelpful, pii_leak"
+    )
+
+
+class FeedbackResponse(BaseModel):
+    status: str
+    feedback_id: str
+
+
+# ---- Health / Info ----
+
+class HealthResponse(BaseModel):
+    status: str
+    gpu_available: bool
+    gpu_memory_gb: Optional[float] = None
+    models_loaded: List[str] = Field(default_factory=list)
+    adapters_available: Dict[str, List[str]] = Field(default_factory=dict)
+    uptime_seconds: float = 0.0
+
+
+class TenantInfo(BaseModel):
+    tenant_id: str
+    domain: str
+    active_model_type: str
+    adapter_path: str
+    rag_collection: str
+    document_count: int
+    topics: List[str]
+
+
+class ModelRegistryEntry(BaseModel):
+    id: str
+    tenant_id: str
+    model_type: str
+    version: str
+    status: str
+    metrics: Dict[str, Any]
+    registered_at: str
+
+
+# ---- Canary ----
+
+class CanaryConfig(BaseModel):
+    tenant_id: TenantID
+    stable_model: ModelType = Field(default=ModelType.SFT)
+    canary_model: ModelType = Field(default=ModelType.DPO)
+    canary_percentage: float = Field(default=10.0, ge=0.0, le=100.0)
+    enabled: bool = Field(default=False)
+```
+
+---
+
+## File 3: `inference/auth.py`
+
+```python
+"""
+Simple authentication and tenant authorization.
+For POC: API key-based auth with tenant scoping.
+"""
+import os
+import hashlib
+import secrets
+from typing import Optional, Dict
+from datetime import datetime
+
+from fastapi import HTTPException, Security, Depends
+from fastapi.security import APIKeyHeader
+from loguru import logger
+
+
+# Simple API key store (in production: use a proper auth service)
+API_KEYS: Dict[str, Dict] = {
+    "poc-sis-key-001": {
+        "tenant_id": "sis",
+        "role": "admin",
+        "created_at": "2025-01-01",
+    },
+    "poc-mfg-key-001": {
+        "tenant_id": "mfg",
+        "role": "admin",
+        "created_at": "2025-01-01",
+    },
+    "poc-demo-key-all": {
+        "tenant_id": "all",  # Can access any tenant (demo mode)
+        "role": "demo",
+        "created_at": "2025-01-01",
+    },
+}
+
+# Header for API key
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+class AuthContext:
+    """Authentication context for a request."""
+
+    def __init__(self, api_key: str, tenant_id: str, role: str):
+        self.api_key = api_key
+        self.tenant_id = tenant_id
+        self.role = role
+        self.authenticated_at = datetime.utcnow().isoformat()
+
+    def can_access_tenant(self, requested_tenant: str) -> bool:
+        """Check if this auth context can access the requested tenant."""
+        if self.tenant_id == "all":
+            return True
+        return self.tenant_id == requested_tenant
+
+
+async def get_auth_context(
+    api_key: Optional[str] = Security(api_key_header),
+) -> AuthContext:
+    """
+    Validate API key and return auth context.
+    In demo mode, allows unauthenticated access.
+    """
+    demo_mode = os.getenv("DEMO_MODE", "true").lower() == "true"
+
+    if not api_key:
+        if demo_mode:
+            return AuthContext(
+                api_key="demo",
+                tenant_id="all",
+                role="demo",
+            )
+        raise HTTPException(status_code=401, detail="Missing API key")
+
+    key_info = API_KEYS.get(api_key)
+    if not key_info:
+        if demo_mode:
+            return AuthContext(api_key="demo", tenant_id="all", role="demo")
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    return AuthContext(
+        api_key=api_key,
+        tenant_id=key_info["tenant_id"],
+        role=key_info["role"],
+    )
+
+
+def verify_tenant_access(auth: AuthContext, requested_tenant: str):
+    """Verify that the authenticated user can access the requested tenant."""
+    if not auth.can_access_tenant(requested_tenant):
+        logger.warning(
+            f"Tenant access denied: key={auth.api_key[:8]}... "
+            f"authorized_tenant={auth.tenant_id} "
+            f"requested_tenant={requested_tenant}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied: your key is scoped to tenant '{auth.tenant_id}', "
+                   f"but you requested tenant '{requested_tenant}'",
+        )
+```
+
+---
+
+## File 4: `inference/adapter_manager.py`
+
+```python
+"""
+Adapter manager for multi-tenant model serving.
+Handles loading base model once and swapping LoRA adapters per tenant.
+Manages adapter lifecycle, caching, and hot-swapping.
+"""
+import os
+import json
+import time
+from pathlib import Path
+from typing import Dict, Optional, Tuple, List
+from threading import Lock
+
+import torch
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class AdapterManager:
+    """
+    Manages a single base model with multiple LoRA adapters.
+    Thread-safe adapter swapping for multi-tenant inference.
+    """
+
+    def __init__(self):
+        self._model = None
+        self._tokenizer = None
+        self._base_loaded = False
+        self._active_adapter: Optional[str] = None
+        self._available_adapters: Dict[str, Dict] = {}
+        self._lock = Lock()
+        self._load_count = 0
+        self._generation_count = 0
+
+    def load_base_model(self):
+        """Load the base model and tokenizer (4-bit quantized)."""
+        if self._base_loaded:
+            logger.info("Base model already loaded")
+            return
+
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+        model_path = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
+        local_path = "./models/base/qwen2.5-1.5b-instruct"
+
+        if Path(local_path).exists():
+            actual_path = local_path
+        else:
+            actual_path = model_path
+
+        logger.info(f"Loading base model: {actual_path}")
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+
+        self._model = AutoModelForCausalLM.from_pretrained(
+            actual_path,
+            quantization_config=bnb_config,
+            device_map="auto",
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+            token=os.getenv("HF_TOKEN"),
+            attn_implementation="eager",
+        )
+        self._model.eval()
+
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            actual_path,
+            trust_remote_code=True,
+            token=os.getenv("HF_TOKEN"),
+        )
+        if self._tokenizer.pad_token is None:
+            self._tokenizer.pad_token = self._tokenizer.eos_token
+            self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
+        self._tokenizer.padding_side = "left"
+
+        self._base_loaded = True
+        self._scan_adapters()
+
+        logger.info(f"Base model loaded. Available adapters: {list(self._available_adapters.keys())}")
+
+    def _scan_adapters(self):
+        """Scan for available adapter directories."""
+        adapters_root = Path("models/adapters")
+        if not adapters_root.exists():
+            return
+
+        for tenant_dir in adapters_root.iterdir():
+            if not tenant_dir.is_dir():
+                continue
+            tenant_id = tenant_dir.name
+            for adapter_dir in tenant_dir.iterdir():
+                if not adapter_dir.is_dir():
+                    continue
+                adapter_type = adapter_dir.name
+                config_path = adapter_dir / "adapter_config.json"
+                if config_path.exists():
+                    adapter_key = f"{tenant_id}_{adapter_type}"
+                    self._available_adapters[adapter_key] = {
+                        "tenant_id": tenant_id,
+                        "adapter_type": adapter_type,
+                        "path": str(adapter_dir),
+                        "loaded": False,
+                    }
+                    logger.info(f"Found adapter: {adapter_key} at {adapter_dir}")
+
+    def get_adapter_key(self, tenant_id: str, model_type: str = "sft") -> str:
+        """Get the adapter key for a tenant and model type."""
+        key = f"{tenant_id}_{model_type}"
+        if key not in self._available_adapters:
+            # Fallback: try other types
+            for fallback_type in ["sft", "dpo", "base"]:
+                fallback_key = f"{tenant_id}_{fallback_type}"
+                if fallback_key in self._available_adapters:
+                    logger.info(f"Adapter {key} not found, falling back to {fallback_key}")
+                    return fallback_key
+            return ""  # No adapter available
+        return key
+
+    def load_adapter(self, adapter_key: str) -> bool:
+        """Load a specific adapter onto the base model."""
+        if not self._base_loaded:
+            self.load_base_model()
+
+        if adapter_key not in self._available_adapters:
+            logger.warning(f"Adapter not found: {adapter_key}")
+            return False
+
+        with self._lock:
+            if self._active_adapter == adapter_key:
+                return True  # Already active
+
+            adapter_info = self._available_adapters[adapter_key]
+            adapter_path = adapter_info["path"]
+
+            try:
+                from peft import PeftModel
+
+                # If we already have a PEFT model, we need to handle adapter swapping
+                if hasattr(self._model, 'peft_config'):
+                    # Try to load as additional adapter
+                    try:
+                        self._model.load_adapter(adapter_path, adapter_name=adapter_key)
+                        self._model.set_adapter(adapter_key)
+                    except Exception:
+                        # Reload from scratch
+                        logger.info(f"Reloading model with adapter: {adapter_key}")
+                        base_model = self._model.get_base_model() if hasattr(self._model, 'get_base_model') else self._model
+                        self._model = PeftModel.from_pretrained(
+                            base_model, adapter_path,
+                            adapter_name=adapter_key,
+                            is_trainable=False,
+                        )
+                else:
+                    self._model = PeftModel.from_pretrained(
+                        self._model, adapter_path,
+                        adapter_name=adapter_key,
+                        is_trainable=False,
+                    )
+
+                self._model.eval()
+                self._active_adapter = adapter_key
+                adapter_info["loaded"] = True
+                self._load_count += 1
+
+                logger.info(f"Adapter loaded: {adapter_key}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to load adapter {adapter_key}: {e}")
+                return False
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        do_sample: bool = True,
+    ) -> str:
+        """
+        Generate a response from the current model state.
+
+        Args:
+            messages: Chat messages in [{"role": ..., "content": ...}] format
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Top-p sampling parameter
+
+        Returns:
+            Generated text string
+        """
+        if not self._base_loaded:
+            self.load_base_model()
+
+        with self._lock:
+            # Apply chat template
+            try:
+                prompt = self._tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            except Exception:
+                # Fallback formatting
+                prompt = self._format_messages_fallback(messages)
+
+            inputs = self._tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=2048 - max_new_tokens,
+                padding=True,
+            ).to(self._model.device)
+
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=max(temperature, 0.01),
+                    top_p=top_p,
+                    do_sample=do_sample,
+                    pad_token_id=self._tokenizer.pad_token_id,
+                    eos_token_id=self._tokenizer.eos_token_id,
+                )
+
+            # Decode only the new tokens
+            input_length = inputs["input_ids"].shape[1]
+            generated_ids = outputs[0][input_length:]
+            response = self._tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            self._generation_count += 1
+            return response.strip()
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+    ):
+        """
+        Generate response tokens one at a time for streaming.
+        Yields individual tokens.
+        """
+        if not self._base_loaded:
+            self.load_base_model()
+
+        from transformers import TextIteratorStreamer
+        from threading import Thread
+
+        with self._lock:
+            try:
+                prompt = self._tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True,
+                )
+            except Exception:
+                prompt = self._format_messages_fallback(messages)
+
+            inputs = self._tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=2048 - max_new_tokens,
+                padding=True,
+            ).to(self._model.device)
+
+            streamer = TextIteratorStreamer(
+                self._tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+            )
+
+            generation_kwargs = {
+                **inputs,
+                "max_new_tokens": max_new_tokens,
+                "temperature": max(temperature, 0.01),
+                "top_p": top_p,
+                "do_sample": True,
+                "pad_token_id": self._tokenizer.pad_token_id,
+                "eos_token_id": self._tokenizer.eos_token_id,
+                "streamer": streamer,
+            }
+
+            thread = Thread(target=self._model.generate, kwargs=generation_kwargs)
+            thread.start()
+
+            self._generation_count += 1
+
+            for token in streamer:
+                yield token
+
+            thread.join()
+
+    def _format_messages_fallback(self, messages: List[Dict]) -> str:
+        """Fallback message formatting."""
+        parts = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            parts.append(f"<|{role}|>\n{content}")
+        parts.append("<|assistant|>\n")
+        return "\n".join(parts)
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._base_loaded
+
+    @property
+    def active_adapter(self) -> Optional[str]:
+        return self._active_adapter
+
+    @property
+    def available_adapters(self) -> Dict:
+        return self._available_adapters
+
+    def get_stats(self) -> Dict:
+        return {
+            "base_loaded": self._base_loaded,
+            "active_adapter": self._active_adapter,
+            "available_adapters": list(self._available_adapters.keys()),
+            "load_count": self._load_count,
+            "generation_count": self._generation_count,
+            "gpu_memory": self._get_gpu_memory(),
+        }
+
+    def _get_gpu_memory(self) -> Dict:
+        if torch.cuda.is_available():
+            return {
+                "allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 2),
+                "reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 2),
+            }
+        return {"available": False}
+
+
+# Global singleton
+_adapter_manager: Optional[AdapterManager] = None
+
+
+def get_adapter_manager() -> AdapterManager:
+    """Get the global adapter manager singleton."""
+    global _adapter_manager
+    if _adapter_manager is None:
+        _adapter_manager = AdapterManager()
+    return _adapter_manager
+```
+
+---
+
+## File 5: `inference/tenant_router.py`
+
+```python
+"""
+Tenant-aware request routing.
+Routes requests to the correct adapter, system prompt, and RAG collection.
+Enforces tenant isolation at every layer.
+"""
+import json
+from typing import Dict, Optional, List
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from loguru import logger
+
+from inference.adapter_manager import get_adapter_manager
+
+
+@dataclass
+class TenantRoute:
+    """Complete routing configuration for a tenant."""
+    tenant_id: str
+    domain: str
+    system_prompt: str
+    adapter_key: str
+    rag_collection: str
+    model_type: str
+    topics: List[str] = field(default_factory=list)
+    policies: List[str] = field(default_factory=list)
+
+
+# Tenant routing table
+TENANT_ROUTES: Dict[str, Dict] = {
+    "sis": {
+        "domain": "Student Information System / Education",
+        "system_prompt": (
+            "You are an expert Student Information System assistant for District 42. "
+            "You help school administrators, teachers, and staff with questions about "
+            "enrollment, attendance, grading, transcripts, student records, accommodations, "
+            "disciplinary procedures, and FERPA compliance.\n\n"
+            "CRITICAL RULES:\n"
+            "1. NEVER disclose student personally identifiable information (PII)\n"
+            "2. Always comply with FERPA regulations\n"
+            "3. Only answer based on the provided knowledge base context\n"
+            "4. Include citations from source documents when available\n"
+            "5. If you don't have enough information, say so clearly\n"
+            "6. If asked about topics outside education/SIS, politely redirect"
+        ),
+        "rag_collection": "tenant_sis_docs",
+        "default_model_type": "sft",
+        "topics": [
+            "enrollment", "attendance", "grading", "transcripts",
+            "student_records", "ferpa_compliance", "transfers",
+            "disciplinary_procedures", "accommodations", "parent_communication",
+        ],
+        "policies": [
+            "FERPA: Never disclose student PII without proper authorization",
+            "FERPA: Verify identity before sharing any student information",
+            "FERPA: Breach notification within 72 hours",
+            "Records: Role-based access control at field level",
+        ],
+    },
+    "mfg": {
+        "domain": "Manufacturing / Industrial Quality Control",
+        "system_prompt": (
+            "You are an expert manufacturing quality and operations assistant. "
+            "You help production operators, quality engineers, and maintenance personnel "
+            "with questions about SOPs, quality control, defect classification, CAPA processes, "
+            "machine maintenance, safety protocols, ISO documentation, and regulatory compliance.\n\n"
+            "CRITICAL RULES:\n"
+            "1. ALWAYS prioritize safety in your responses\n"
+            "2. NEVER suggest bypassing safety procedures or skipping inspections\n"
+            "3. Only answer based on the provided knowledge base context\n"
+            "4. Include citations from source documents when available\n"
+            "5. If you don't have enough information, say so clearly\n"
+            "6. If asked about topics outside manufacturing/quality, politely redirect\n"
+            "7. When in doubt about safety, recommend consulting a supervisor"
+        ),
+        "rag_collection": "tenant_mfg_docs",
+        "default_model_type": "sft",
+        "topics": [
+            "standard_operating_procedures", "quality_control", "capa",
+            "iso_documentation", "machine_maintenance", "safety_protocols",
+            "defect_classification", "production_scheduling", "inventory",
+            "regulatory_compliance",
+        ],
+        "policies": [
+            "Safety: Never bypass LOTO procedures",
+            "Safety: All PPE requirements are mandatory",
+            "Quality: Never ship non-conforming product without proper disposition",
+            "Compliance: All incidents must be reported within 4 hours",
+        ],
+    },
+}
+
+
+def get_tenant_route(tenant_id: str, model_type: str = None) -> TenantRoute:
+    """
+    Get the complete routing configuration for a tenant.
+
+    Args:
+        tenant_id: Tenant identifier
+        model_type: Requested model type (sft, dpo, base)
+
+    Returns:
+        TenantRoute with all routing information
+
+    Raises:
+        ValueError if tenant not found
+    """
+    route_config = TENANT_ROUTES.get(tenant_id)
+    if not route_config:
+        raise ValueError(f"Unknown tenant: {tenant_id}. Available: {list(TENANT_ROUTES.keys())}")
+
+    # Determine adapter
+    effective_model_type = model_type or route_config.get("default_model_type", "sft")
+    manager = get_adapter_manager()
+    adapter_key = manager.get_adapter_key(tenant_id, effective_model_type)
+
+    return TenantRoute(
+        tenant_id=tenant_id,
+        domain=route_config["domain"],
+        system_prompt=route_config["system_prompt"],
+        adapter_key=adapter_key,
+        rag_collection=route_config["rag_collection"],
+        model_type=effective_model_type,
+        topics=route_config.get("topics", []),
+        policies=route_config.get("policies", []),
+    )
+
+
+def list_tenants() -> List[Dict]:
+    """List all available tenants with their configuration."""
+    tenants = []
+    manager = get_adapter_manager()
+
+    for tenant_id, config in TENANT_ROUTES.items():
+        adapter_key = manager.get_adapter_key(tenant_id, config.get("default_model_type", "sft"))
+        tenants.append({
+            "tenant_id": tenant_id,
+            "domain": config["domain"],
+            "default_model_type": config.get("default_model_type", "sft"),
+            "adapter_available": adapter_key in manager.available_adapters,
+            "adapter_key": adapter_key,
+            "rag_collection": config["rag_collection"],
+            "topics": config.get("topics", []),
+        })
+    return tenants
+
+
+def validate_tenant_isolation(tenant_id: str, context_chunks: List[Dict]) -> List[Dict]:
+    """
+    Validate that retrieved chunks belong to the correct tenant.
+    Filter out any cross-tenant contamination.
+    """
+    clean_chunks = []
+    violations = []
+
+    for chunk in context_chunks:
+        chunk_tenant = chunk.get("tenant_id", chunk.get("metadata", {}).get("tenant_id", ""))
+        if chunk_tenant == tenant_id or chunk_tenant == "":
+            clean_chunks.append(chunk)
+        else:
+            violations.append({
+                "chunk_id": chunk.get("chunk_id", "unknown"),
+                "expected_tenant": tenant_id,
+                "actual_tenant": chunk_tenant,
+            })
+
+    if violations:
+        logger.warning(
+            f"TENANT ISOLATION VIOLATION: {len(violations)} cross-tenant chunks "
+            f"filtered for tenant {tenant_id}"
+        )
+
+    return clean_chunks
+```
+
+---
+
+## File 6: `inference/canary.py`
+
+```python
+"""
+Canary deployment and A/B testing support.
+Routes a percentage of traffic to a candidate model version.
+"""
+import json
+import random
+from pathlib import Path
+from typing import Dict, Optional
+from datetime import datetime
+from threading import Lock
+
+from loguru import logger
+
+
+class CanaryManager:
+    """
+    Manages canary/A/B deployment configuration per tenant.
+    """
+
+    def __init__(self):
+        self._configs: Dict[str, Dict] = {}
+        self._stats: Dict[str, Dict] = {}
+        self._lock = Lock()
+        self._load_config()
+
+    def _load_config(self):
+        """Load canary config from file if exists."""
+        config_path = Path("models/canary_config.json")
+        if config_path.exists():
+            with open(config_path) as f:
+                self._configs = json.load(f)
+            logger.info(f"Canary config loaded: {list(self._configs.keys())}")
+
+    def _save_config(self):
+        """Save canary config to file."""
+        config_path = Path("models/canary_config.json")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(self._configs, indent=2))
+
+    def set_canary(
+        self,
+        tenant_id: str,
+        stable_model: str = "sft",
+        canary_model: str = "dpo",
+        canary_percentage: float = 10.0,
+        enabled: bool = True,
+    ):
+        """Configure canary deployment for a tenant."""
+        with self._lock:
+            self._configs[tenant_id] = {
+                "stable_model": stable_model,
+                "canary_model": canary_model,
+                "canary_percentage": canary_percentage,
+                "enabled": enabled,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            self._stats[tenant_id] = {
+                "stable_count": 0,
+                "canary_count": 0,
+                "total_count": 0,
+            }
+            self._save_config()
+            logger.info(
+                f"Canary configured for {tenant_id}: "
+                f"{canary_percentage}% → {canary_model}, "
+                f"{100-canary_percentage}% → {stable_model}"
+            )
+
+    def get_model_type(self, tenant_id: str) -> tuple:
+        """
+        Determine which model type to use for a request.
+
+        Returns:
+            (model_type, is_canary)
+        """
+        with self._lock:
+            config = self._configs.get(tenant_id)
+            if not config or not config.get("enabled", False):
+                return "sft", False  # Default
+
+            roll = random.random() * 100
+            is_canary = roll < config["canary_percentage"]
+
+            # Update stats
+            if tenant_id not in self._stats:
+                self._stats[tenant_id] = {"stable_count": 0, "canary_count": 0, "total_count": 0}
+
+            self._stats[tenant_id]["total_count"] += 1
+            if is_canary:
+                self._stats[tenant_id]["canary_count"] += 1
+                return config["canary_model"], True
+            else:
+                self._stats[tenant_id]["stable_count"] += 1
+                return config["stable_model"], False
+
+    def disable_canary(self, tenant_id: str):
+        """Disable canary for a tenant (rollback to stable)."""
+        with self._lock:
+            if tenant_id in self._configs:
+                self._configs[tenant_id]["enabled"] = False
+                self._save_config()
+                logger.info(f"Canary disabled for {tenant_id} (rolled back to stable)")
+
+    def promote_canary(self, tenant_id: str):
+        """Promote canary to stable (full rollout)."""
+        with self._lock:
+            config = self._configs.get(tenant_id)
+            if config:
+                config["canary_percentage"] = 100.0
+                self._save_config()
+                logger.info(f"Canary promoted for {tenant_id}: 100% → {config['canary_model']}")
+
+    def get_stats(self, tenant_id: str = None) -> Dict:
+        """Get canary traffic statistics."""
+        if tenant_id:
+            return {
+                "config": self._configs.get(tenant_id, {}),
+                "stats": self._stats.get(tenant_id, {}),
+            }
+        return {
+            "configs": self._configs,
+            "stats": self._stats,
+        }
+
+
+# Global singleton
+_canary_manager: Optional[CanaryManager] = None
+
+
+def get_canary_manager() -> CanaryManager:
+    global _canary_manager
+    if _canary_manager is None:
+        _canary_manager = CanaryManager()
+    return _canary_manager
+```
+
+---
+
+## File 7: `inference/audit_logger.py`
+
+```python
+"""
+Audit logging for all inference requests.
+Stores request/response data with tenant isolation for compliance.
+"""
+import json
+import uuid
+import sqlite3
+from pathlib import Path
+from typing import Dict, Optional, List
+from datetime import datetime
+from threading import Lock
+
+from loguru import logger
+
+
+class AuditLogger:
+    """SQLite-based audit logger for inference requests."""
+
+    def __init__(self, db_path: str = "logs/audit.db"):
+        self._db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = Lock()
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize the audit database."""
+        conn = sqlite3.connect(self._db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS requests (
+                request_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                user_message TEXT,
+                model_response TEXT,
+                model_type TEXT,
+                model_version TEXT,
+                adapter_key TEXT,
+                is_canary INTEGER DEFAULT 0,
+                use_rag INTEGER DEFAULT 1,
+                retrieval_method TEXT,
+                citations_count INTEGER DEFAULT 0,
+                grounding_score REAL,
+                latency_ms REAL,
+                retrieval_time_ms REAL,
+                generation_time_ms REAL,
+                token_count INTEGER,
+                was_refused INTEGER DEFAULT 0,
+                was_blocked INTEGER DEFAULT 0,
+                error TEXT,
+                metadata TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                feedback_id TEXT PRIMARY KEY,
+                request_id TEXT,
+                tenant_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                rating INTEGER,
+                feedback_type TEXT,
+                comment TEXT,
+                flagged_issues TEXT,
+                FOREIGN KEY (request_id) REFERENCES requests(request_id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_requests_tenant ON requests(tenant_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id)
+        """)
+        conn.commit()
+        conn.close()
+
+    def log_request(
+        self,
+        tenant_id: str,
+        user_message: str,
+        model_response: str,
+        model_type: str = "",
+        model_version: str = "",
+        adapter_key: str = "",
+        is_canary: bool = False,
+        use_rag: bool = True,
+        retrieval_method: str = "",
+        citations_count: int = 0,
+        grounding_score: float = None,
+        latency_ms: float = 0,
+        retrieval_time_ms: float = 0,
+        generation_time_ms: float = 0,
+        token_count: int = 0,
+        was_refused: bool = False,
+        was_blocked: bool = False,
+        error: str = None,
+        metadata: Dict = None,
+    ) -> str:
+        """Log an inference request. Returns request_id."""
+        request_id = str(uuid.uuid4())[:12]
+
+        with self._lock:
+            conn = sqlite3.connect(self._db_path)
+            conn.execute(
+                """INSERT INTO requests VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )""",
+                (
+                    request_id,
+                    tenant_id,
+                    datetime.utcnow().isoformat(),
+                    user_message[:2000],
+                    model_response[:5000],
+                    model_type,
+                    model_version,
+                    adapter_key,
+                    int(is_canary),
+                    int(use_rag),
+                    retrieval_method,
+                    citations_count,
+                    grounding_score,
+                    latency_ms,
+                    retrieval_time_ms,
+                    generation_time_ms,
+                    token_count,
+                    int(was_refused),
+                    int(was_blocked),
+                    error,
+                    json.dumps(metadata or {}),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+        return request_id
+
+    def log_feedback(
+        self,
+        request_id: str,
+        tenant_id: str,
+        rating: int,
+        feedback_type: str = "thumbs",
+        comment: str = None,
+        flagged_issues: List[str] = None,
+    ) -> str:
+        """Log user feedback. Returns feedback_id."""
+        feedback_id = str(uuid.uuid4())[:12]
+
+        with self._lock:
+            conn = sqlite3.connect(self._db_path)
+            conn.execute(
+                "INSERT INTO feedback VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    feedback_id,
+                    request_id,
+                    tenant_id,
+                    datetime.utcnow().isoformat(),
+                    rating,
+                    feedback_type,
+                    comment,
+                    json.dumps(flagged_issues or []),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+        return feedback_id
+
+    def get_request_stats(self, tenant_id: str = None, hours: int = 24) -> Dict:
+        """Get request statistics."""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+
+        if tenant_id:
+            rows = conn.execute(
+                """SELECT
+                    COUNT(*) as total,
+                    AVG(latency_ms) as avg_latency,
+                    MAX(latency_ms) as max_latency,
+                    MIN(latency_ms) as min_latency,
+                    SUM(was_refused) as refusals,
+                    SUM(was_blocked) as blocked,
+                    SUM(is_canary) as canary_requests,
+                    AVG(grounding_score) as avg_grounding
+                FROM requests WHERE tenant_id = ?
+                AND timestamp >= datetime('now', ?)""",
+                (tenant_id, f"-{hours} hours"),
+            ).fetchone()
+        else:
+            rows = conn.execute(
+                """SELECT
+                    COUNT(*) as total,
+                    AVG(latency_ms) as avg_latency,
+                    MAX(latency_ms) as max_latency,
+                    MIN(latency_ms) as min_latency,
+                    SUM(was_refused) as refusals,
+                    SUM(was_blocked) as blocked,
+                    SUM(is_canary) as canary_requests,
+                    AVG(grounding_score) as avg_grounding
+                FROM requests
+                WHERE timestamp >= datetime('now', ?)""",
+                (f"-{hours} hours",),
+            ).fetchone()
+
+        # Feedback stats
+        if tenant_id:
+            fb_rows = conn.execute(
+                """SELECT AVG(rating) as avg_rating, COUNT(*) as feedback_count
+                FROM feedback WHERE tenant_id = ?""",
+                (tenant_id,),
+            ).fetchone()
+        else:
+            fb_rows = conn.execute(
+                "SELECT AVG(rating) as avg_rating, COUNT(*) as feedback_count FROM feedback"
+            ).fetchone()
+
+        conn.close()
+
+        return {
+            "total_requests": rows["total"] if rows else 0,
+            "avg_latency_ms": round(rows["avg_latency"] or 0, 1) if rows else 0,
+            "max_latency_ms": round(rows["max_latency"] or 0, 1) if rows else 0,
+            "min_latency_ms": round(rows["min_latency"] or 0, 1) if rows else 0,
+            "refusals": rows["refusals"] or 0 if rows else 0,
+            "blocked": rows["blocked"] or 0 if rows else 0,
+            "canary_requests": rows["canary_requests"] or 0 if rows else 0,
+            "avg_grounding_score": round(rows["avg_grounding"] or 0, 3) if rows else 0,
+            "avg_feedback_rating": round(fb_rows["avg_rating"] or 0, 2) if fb_rows else 0,
+            "feedback_count": fb_rows["feedback_count"] or 0 if fb_rows else 0,
+            "tenant_id": tenant_id or "all",
+            "period_hours": hours,
+        }
+
+    def get_recent_requests(self, tenant_id: str = None, limit: int = 20) -> List[Dict]:
+        """Get recent requests for monitoring."""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+
+        if tenant_id:
+            rows = conn.execute(
+                """SELECT request_id, tenant_id, timestamp, user_message,
+                   model_type, latency_ms, was_refused, grounding_score
+                FROM requests WHERE tenant_id = ?
+                ORDER BY timestamp DESC LIMIT ?""",
+                (tenant_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT request_id, tenant_id, timestamp, user_message,
+                   model_type, latency_ms, was_refused, grounding_score
+                FROM requests ORDER BY timestamp DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+
+        conn.close()
+        return [dict(row) for row in rows]
+
+
+# Global singleton
+_audit_logger: Optional[AuditLogger] = None
+
+
+def get_audit_logger() -> AuditLogger:
+    global _audit_logger
+    if _audit_logger is None:
+        _audit_logger = AuditLogger()
+    return _audit_logger
+```
+
+---
+
+## File 8: `inference/main.py`
+
+```python
+"""
+Main FastAPI inference server.
+Multi-tenant LLM inference with streaming, RAG, tenant routing,
+canary deployment, audit logging, and feedback collection.
+
+Usage:
+    uvicorn inference.main:app --host 0.0.0.0 --port 8000
+    uvicorn inference.main:app --host 0.0.0.0 --port 8000 --reload
+"""
+import os
+import time
+import json
+import asyncio
+from typing import Optional
+from datetime import datetime
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from sse_starlette.sse import EventSourceResponse
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from inference.schemas import (
+    ChatRequest, ChatResponse, Citation, StreamChunk,
+    FeedbackRequest, FeedbackResponse,
+    HealthResponse, TenantInfo, ModelRegistryEntry,
+    CanaryConfig,
+)
+from inference.auth import get_auth_context, verify_tenant_access, AuthContext
+from inference.adapter_manager import get_adapter_manager
+from inference.tenant_router import get_tenant_route, list_tenants, validate_tenant_isolation
+from inference.canary import get_canary_manager
+from inference.audit_logger import get_audit_logger
+
+# Track server start time
+_server_start_time = time.time()
+_model_loaded = False
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: load models on startup."""
+    global _model_loaded
+    logger.info("Starting inference server...")
+
+    # Optionally pre-load model
+    preload = os.getenv("PRELOAD_MODEL", "false").lower() == "true"
+    if preload:
+        logger.info("Pre-loading base model...")
+        manager = get_adapter_manager()
+        manager.load_base_model()
+        _model_loaded = True
+        logger.info("Model pre-loaded")
+    else:
+        logger.info("Model will be loaded on first request (set PRELOAD_MODEL=true to preload)")
+
+    yield
+
+    logger.info("Shutting down inference server...")
+
+
+app = FastAPI(
+    title="Multi-Tenant LLM Inference API",
+    description="Domain-adapted LLM serving with tenant isolation, RAG, and streaming",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# CORS for web frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# Health & Info Endpoints
+# ============================================================
+
+@app.get("/health", response_model=HealthResponse, tags=["System"])
+async def health_check():
+    """Health check endpoint."""
+    manager = get_adapter_manager()
+    stats = manager.get_stats()
+
+    return HealthResponse(
+        status="healthy",
+        gpu_available=stats.get("gpu_memory", {}).get("available", True),
+        gpu_memory_gb=stats.get("gpu_memory", {}).get("allocated_gb"),
+        models_loaded=["base"] if stats["base_loaded"] else [],
+        adapters_available={
+            k: [v["adapter_type"]]
+            for k, v in manager.available_adapters.items()
+        },
+        uptime_seconds=round(time.time() - _server_start_time, 1),
+    )
+
+
+@app.get("/tenants", tags=["System"])
+async def get_tenants():
+    """List all available tenants."""
+    return list_tenants()
+
+
+@app.get("/tenants/{tenant_id}", response_model=TenantInfo, tags=["System"])
+async def get_tenant_info(tenant_id: str):
+    """Get detailed tenant information."""
+    try:
+        route = get_tenant_route(tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # Get document count from RAG
+    doc_count = 0
+    try:
+        from rag.build_index import get_chroma_client, get_collection_name
+        client = get_chroma_client()
+        collection = client.get_collection(get_collection_name(tenant_id))
+        doc_count = collection.count()
+    except Exception:
+        pass
+
+    return TenantInfo(
+        tenant_id=route.tenant_id,
+        domain=route.domain,
+        active_model_type=route.model_type,
+        adapter_path=route.adapter_key,
+        rag_collection=route.rag_collection,
+        document_count=doc_count,
+        topics=route.topics,
+    )
+
+
+# ============================================================
+# Chat Endpoint (non-streaming)
+# ============================================================
+
+@app.post("/chat", response_model=ChatResponse, tags=["Inference"])
+async def chat(
+    request: ChatRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """
+    Send a chat message and receive a complete response.
+    Supports RAG, tenant-specific routing, and audit logging.
+    """
+    verify_tenant_access(auth, request.tenant_id.value)
+    tenant_id = request.tenant_id.value
+    t_start = time.time()
+
+    try:
+        # Get routing config
+        canary_mgr = get_canary_manager()
+        model_type, is_canary = canary_mgr.get_model_type(tenant_id)
+        if request.model_type.value != "sft":
+            model_type = request.model_type.value
+
+        route = get_tenant_route(tenant_id, model_type)
+
+        # Load adapter
+        manager = get_adapter_manager()
+        if not manager.is_loaded:
+            manager.load_base_model()
+
+        if route.adapter_key:
+            manager.load_adapter(route.adapter_key)
+
+        # Build messages
+        messages = [{"role": "system", "content": route.system_prompt}]
+
+        # Add conversation history
+        for msg in request.conversation_history:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        # RAG retrieval
+        citations = []
+        retrieval_time_ms = 0
+        retrieval_method = "none"
+        grounding_score = None
+
+        if request.use_rag:
+            try:
+                from rag.rag_chain import RAGRequest, execute_rag_chain
+
+                rag_request = RAGRequest(
+                    query=request.message,
+                    tenant_id=tenant_id,
+                    top_k=3,
+                    topic_filter=request.topic_filter,
+                )
+
+                def gen_fn(msgs):
+                    return manager.generate(
+                        msgs,
+                        max_new_tokens=request.max_new_tokens,
+                        temperature=request.temperature,
+                        top_p=request.top_p,
+                    )
+
+                rag_response = execute_rag_chain(rag_request, generate_fn=gen_fn)
+
+                answer = rag_response.answer
+                citations = [
+                    Citation(**c) for c in rag_response.citations
+                ]
+                retrieval_time_ms = rag_response.retrieval_time_ms
+                retrieval_method = rag_response.retrieval_result.get("retrieval_method", "")
+                if rag_response.grounding_report:
+                    grounding_score = rag_response.grounding_report.get("grounding_score")
+
+            except Exception as e:
+                logger.warning(f"RAG failed, falling back to direct generation: {e}")
+                messages.append({"role": "user", "content": request.message})
+                answer = manager.generate(
+                    messages,
+                    max_new_tokens=request.max_new_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                )
+        else:
+            messages.append({"role": "user", "content": request.message})
+            answer = manager.generate(
+                messages,
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+            )
+
+        total_time = round((time.time() - t_start) * 1000, 2)
+        generation_time = total_time - retrieval_time_ms
+
+        # Audit log
+        audit = get_audit_logger()
+        request_id = audit.log_request(
+            tenant_id=tenant_id,
+            user_message=request.message,
+            model_response=answer,
+            model_type=model_type,
+            adapter_key=route.adapter_key,
+            is_canary=is_canary,
+            use_rag=request.use_rag,
+            retrieval_method=retrieval_method,
+            citations_count=len(citations),
+            grounding_score=grounding_score,
+            latency_ms=total_time,
+            retrieval_time_ms=retrieval_time_ms,
+            generation_time_ms=generation_time,
+            token_count=len(answer.split()),
+        )
+
+        return ChatResponse(
+            tenant_id=tenant_id,
+            message=answer,
+            citations=citations,
+            model_version=route.adapter_key or "base",
+            model_type=model_type,
+            retrieval_method=retrieval_method,
+            grounding_score=grounding_score,
+            latency_ms=total_time,
+            retrieval_time_ms=retrieval_time_ms,
+            generation_time_ms=generation_time,
+            request_id=request_id,
+            timestamp=datetime.utcnow().isoformat(),
+        )
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        # Log error
+        audit = get_audit_logger()
+        audit.log_request(
+            tenant_id=tenant_id,
+            user_message=request.message,
+            model_response="",
+            error=str(e),
+            latency_ms=round((time.time() - t_start) * 1000, 2),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Streaming Chat Endpoint
+# ============================================================
+
+@app.post("/chat/stream", tags=["Inference"])
+async def chat_stream(
+    request: ChatRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """
+    Send a chat message and receive a streaming SSE response.
+    Tokens are sent as they are generated.
+    """
+    verify_tenant_access(auth, request.tenant_id.value)
+    tenant_id = request.tenant_id.value
+
+    async def event_generator():
+        t_start = time.time()
+        full_response = ""
+
+        try:
+            # Get routing
+            canary_mgr = get_canary_manager()
+            model_type, is_canary = canary_mgr.get_model_type(tenant_id)
+
+            route = get_tenant_route(tenant_id, model_type)
+
+            manager = get_adapter_manager()
+            if not manager.is_loaded:
+                manager.load_base_model()
+            if route.adapter_key:
+                manager.load_adapter(route.adapter_key)
+
+            # Build messages with RAG context
+            messages = [{"role": "system", "content": route.system_prompt}]
+            for msg in request.conversation_history:
+                messages.append({"role": msg.role, "content": msg.content})
+
+            citations_data = []
+            retrieval_time_ms = 0
+
+            if request.use_rag:
+                try:
+                    from rag.retriever import retrieve, format_context_for_llm, format_citations
+
+                    retrieval_result = retrieve(
+                        query=request.message,
+                        tenant_id=tenant_id,
+                        top_k=3,
+                    )
+                    retrieval_time_ms = retrieval_result.retrieval_time_ms
+                    context = format_context_for_llm(retrieval_result)
+                    citations_data = format_citations(retrieval_result)
+
+                    user_msg = (
+                        f"Context from knowledge base:\n"
+                        f"{'='*40}\n{context}\n{'='*40}\n\n"
+                        f"Question: {request.message}\n\n"
+                        f"Answer based on the context above. Include citations."
+                    )
+                    messages.append({"role": "user", "content": user_msg})
+
+                except Exception as e:
+                    logger.warning(f"RAG failed in stream: {e}")
+                    messages.append({"role": "user", "content": request.message})
+            else:
+                messages.append({"role": "user", "content": request.message})
+
+            # Send citations first
+            if citations_data:
+                yield {
+                    "event": "citations",
+                    "data": json.dumps({"citations": citations_data}),
+                }
+
+            # Stream tokens
+            for token in manager.generate_stream(
+                messages,
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+            ):
+                full_response += token
+                yield {
+                    "event": "token",
+                    "data": json.dumps({"token": token}),
+                }
+
+            # Send completion
+            total_time = round((time.time() - t_start) * 1000, 2)
+
+            # Audit log
+            audit = get_audit_logger()
+            request_id = audit.log_request(
+                tenant_id=tenant_id,
+                user_message=request.message,
+                model_response=full_response,
+                model_type=model_type,
+                adapter_key=route.adapter_key,
+                is_canary=is_canary,
+                use_rag=request.use_rag,
+                citations_count=len(citations_data),
+                latency_ms=total_time,
+                retrieval_time_ms=retrieval_time_ms,
+                generation_time_ms=total_time - retrieval_time_ms,
+                token_count=len(full_response.split()),
+            )
+
+            yield {
+                "event": "done",
+                "data": json.dumps({
+                    "request_id": request_id,
+                    "total_tokens": len(full_response.split()),
+                    "latency_ms": total_time,
+                    "model_type": model_type,
+                    "is_canary": is_canary,
+                }),
+            }
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": str(e)}),
+            }
+
+    return EventSourceResponse(event_generator())
+
+
+# ============================================================
+# Feedback Endpoint
+# ============================================================
+
+@app.post("/feedback", response_model=FeedbackResponse, tags=["Feedback"])
+async def submit_feedback(
+    request: FeedbackRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Submit feedback on a model response."""
+    verify_tenant_access(auth, request.tenant_id.value)
+
+    audit = get_audit_logger()
+    feedback_id = audit.log_feedback(
+        request_id=request.request_id,
+        tenant_id=request.tenant_id.value,
+        rating=request.rating,
+        feedback_type=request.feedback_type,
+        comment=request.comment,
+        flagged_issues=request.flagged_issues,
+    )
+
+    return FeedbackResponse(status="recorded", feedback_id=feedback_id)
+
+
+# ============================================================
+# Monitoring Endpoints
+# ============================================================
+
+@app.get("/stats", tags=["Monitoring"])
+async def get_stats(
+    tenant_id: Optional[str] = Query(None),
+    hours: int = Query(24, ge=1, le=720),
+):
+    """Get request statistics."""
+    audit = get_audit_logger()
+    return audit.get_request_stats(tenant_id, hours)
+
+
+@app.get("/stats/recent", tags=["Monitoring"])
+async def get_recent(
+    tenant_id: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Get recent requests."""
+    audit = get_audit_logger()
+    return audit.get_recent_requests(tenant_id, limit)
+
+
+@app.get("/model/stats", tags=["Monitoring"])
+async def get_model_stats():
+    """Get model/adapter statistics."""
+    manager = get_adapter_manager()
+    return manager.get_stats()
+
+
+# ============================================================
+# Canary Endpoints
+# ============================================================
+
+@app.post("/canary/configure", tags=["Canary"])
+async def configure_canary(config: CanaryConfig):
+    """Configure canary deployment for a tenant."""
+    canary = get_canary_manager()
+    canary.set_canary(
+        tenant_id=config.tenant_id.value,
+        stable_model=config.stable_model.value,
+        canary_model=config.canary_model.value,
+        canary_percentage=config.canary_percentage,
+        enabled=config.enabled,
+    )
+    return {"status": "configured", "config": canary.get_stats(config.tenant_id.value)}
+
+
+@app.post("/canary/disable/{tenant_id}", tags=["Canary"])
+async def disable_canary(tenant_id: str):
+    """Disable canary (rollback to stable)."""
+    canary = get_canary_manager()
+    canary.disable_canary(tenant_id)
+    return {"status": "disabled", "tenant_id": tenant_id}
+
+
+@app.post("/canary/promote/{tenant_id}", tags=["Canary"])
+async def promote_canary(tenant_id: str):
+    """Promote canary to stable (full rollout)."""
+    canary = get_canary_manager()
+    canary.promote_canary(tenant_id)
+    return {"status": "promoted", "tenant_id": tenant_id}
+
+
+@app.get("/canary/stats", tags=["Canary"])
+async def canary_stats(tenant_id: Optional[str] = None):
+    """Get canary deployment statistics."""
+    canary = get_canary_manager()
+    return canary.get_stats(tenant_id)
+
+
+# ============================================================
+# Model Registry Endpoint
+# ============================================================
+
+@app.get("/registry", tags=["Registry"])
+async def get_registry(tenant_id: Optional[str] = None):
+    """Get model registry entries."""
+    from training.mlflow_utils import ModelRegistry
+    registry = ModelRegistry()
+    models = registry.list_models(tenant_id)
+    return {
+        "models": models,
+        "summary": registry.get_summary(),
+    }
+
+
+# ============================================================
+# Direct RAG Test Endpoint (no LLM)
+# ============================================================
+
+@app.get("/rag/test", tags=["Debug"])
+async def test_rag(
+    query: str = Query(..., description="Search query"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    top_k: int = Query(3, ge=1, le=10),
+):
+    """Test RAG retrieval without LLM generation."""
+    try:
+        from rag.retriever import retrieve, format_citations
+        from dataclasses import asdict
+
+        result = retrieve(query, tenant_id, top_k=top_k)
+        return {
+            "query": query,
+            "tenant_id": tenant_id,
+            "total_retrieved": result.total_retrieved,
+            "retrieval_method": result.retrieval_method,
+            "retrieval_time_ms": result.retrieval_time_ms,
+            "chunks": [
+                {
+                    "rank": c.rank,
+                    "score": round(c.score, 3),
+                    "title": c.title,
+                    "topic": c.topic,
+                    "content": c.content[:200] + "..." if len(c.content) > 200 else c.content,
+                    "citation_key": c.citation_key,
+                }
+                for c in result.chunks
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("INFERENCE_PORT", 8000))
+    uvicorn.run(
+        "inference.main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        log_level="info",
+    )
+```
+
+---
+
+## How to run this series
+
+```bash
+# Start the inference server
+uvicorn inference.main:app --host 0.0.0.0 --port 8000
+
+# Or with auto-reload for development
+uvicorn inference.main:app --host 0.0.0.0 --port 8000 --reload
+
+# With model pre-loading
+PRELOAD_MODEL=true uvicorn inference.main:app --host 0.0.0.0 --port 8000
+
+# In demo mode (no API key required) - this is the default
+DEMO_MODE=true uvicorn inference.main:app --host 0.0.0.0 --port 8000
+```
+
+### Testing the API with curl
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# List tenants
+curl http://localhost:8000/tenants
+
+# Tenant info
+curl http://localhost:8000/tenants/sis
+
+# Test RAG retrieval (no LLM needed)
+curl "http://localhost:8000/rag/test?query=enrollment+process&tenant_id=sis&top_k=3"
+
+# Chat (non-streaming)
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_id": "sis",
+    "message": "What documents are needed for enrollment?",
+    "use_rag": true,
+    "use_streaming": false,
+    "max_new_tokens": 256
+  }'
+
+# Chat (streaming SSE)
+curl -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "tenant_id": "mfg",
+    "message": "What is the lockout tagout procedure?",
+    "use_rag": true,
+    "max_new_tokens": 256
+  }'
+
+# Submit feedback
+curl -X POST http://localhost:8000/feedback \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id": "abc123",
+    "tenant_id": "sis",
+    "rating": 4,
+    "feedback_type": "thumbs",
+    "comment": "Good answer but could include more detail"
+  }'
+
+# Get stats
+curl http://localhost:8000/stats
+curl "http://localhost:8000/stats?tenant_id=sis&hours=1"
+
+# Recent requests
+curl http://localhost:8000/stats/recent
+
+# Configure canary (10% traffic to DPO model)
+curl -X POST http://localhost:8000/canary/configure \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_id": "sis",
+    "stable_model": "sft",
+    "canary_model": "dpo",
+    "canary_percentage": 10.0,
+    "enabled": true
+  }'
+
+# Canary stats
+curl http://localhost:8000/canary/stats
+
+# Rollback canary
+curl -X POST http://localhost:8000/canary/disable/sis
+
+# Model registry
+curl http://localhost:8000/registry
+
+# With API key
+curl http://localhost:8000/chat \
+  -H "X-API-Key: poc-sis-key-001" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id": "sis", "message": "What is FERPA?"}'
+```
+
+### Expected API responses
+
+**Health check:**
+```json
+{
+  "status": "healthy",
+  "gpu_available": true,
+  "gpu_memory_gb": 1.2,
+  "models_loaded": ["base"],
+  "adapters_available": {
+    "sis_sft": ["sft"],
+    "mfg_sft": ["sft"],
+    "sis_dpo": ["dpo"]
+  },
+  "uptime_seconds": 45.3
+}
+```
+
+**Chat response:**
+```json
+{
+  "tenant_id": "sis",
+  "message": "For enrollment in District 42, students must provide proof of residency, immunization records, and a birth certificate [Enrollment Policy — enrollment]. Transfer students must also submit official transcripts from their previous institution. The registrar verifies documents within 3 business days [Enrollment Policy — enrollment].",
+  "citations": [
+    {
+      "title": "Enrollment Policy",
+      "topic": "enrollment",
+      "source_file": "enrollment_000.txt",
+      "relevance_score": 0.892,
+      "citation_key": "[Enrollment Policy — enrollment]"
+    }
+  ],
+  "model_version": "sis_sft",
+  "model_type": "sft",
+  "retrieval_method": "hybrid+reranked",
+  "grounding_score": 0.85,
+  "latency_ms": 2340.5,
+  "retrieval_time_ms": 85.2,
+  "generation_time_ms": 2255.3,
+  "request_id": "a1b2c3d4e5f6",
+  "timestamp": "2025-01-15T14:30:00Z"
+}
+```
+
+**Streaming SSE:**
+```
+event: citations
+data: {"citations": [{"title": "Enrollment Policy", ...}]}
+
+event: token
+data: {"token": "For"}
+
+event: token
+data: {"token": " enrollment"}
+
+event: token
+data: {"token": " in"}
+
+...
+
+event: done
+data: {"request_id": "x1y2z3", "total_tokens": 87, "latency_ms": 2100, "model_type": "sft", "is_canary": false}
+```
+
+### OpenAPI docs
+
+Once the server is running, visit `http://localhost:8000/docs` for the interactive Swagger UI.
+
+### Files created at runtime
+
+```
+logs/
+└── audit.db          (SQLite audit database)
+
+models/
+└── canary_config.json (canary deployment config)
+```
+
+---
+
+### Architecture decisions in the inference layer
+
+| Decision | Rationale |
+|---|---|
+| **Single base model + adapter swap** | Minimizes VRAM usage; only 1 base model loaded |
+| **Thread lock on generation** | Prevents concurrent adapter swaps mid-generation |
+| **SSE streaming** | Standard for LLM streaming; works with web/mobile clients |
+| **SQLite audit log** | Zero-dependency, file-based, sufficient for POC |
+| **Demo mode auth** | Allows running without API keys for development/demo |
+| **Canary by random roll** | Simple, stateless traffic splitting |
+| **RAG fallback** | If RAG fails, falls back to direct generation |
+| **Citations in SSE** | Sent before tokens so UI can display sources while streaming |
+| **Tenant isolation validation** | Explicit check that retrieved chunks belong to correct tenant |
+
+---
+
+**Next: Series 6 — Web Application (`web_app/`)**
+
+Shall I continue with Series 6?

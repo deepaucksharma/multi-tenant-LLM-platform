@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = [
+    "tenant_data_pipeline",
+    "rag",
+    "training",
+    "evaluation",
+    "inference",
+    "voice_agent",
+    "monitoring",
+    "mlops",
+]
+omit = ["tests/*", "*/config.py"]

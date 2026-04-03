@@ -1,0 +1,1623 @@
+
+
+# Series 7 of 10: Mobile App (`mobile_app/`)
+
+This covers a Flutter mobile application with tenant-aware chat, streaming responses, citation display, feedback, and offline-readiness indicators. Designed as a thin client that calls the same FastAPI backend.
+
+---
+
+## File 1: `mobile_app/pubspec.yaml`
+
+```yaml
+name: multi_tenant_llm
+description: Multi-Tenant LLM Mobile Client
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  provider: ^6.1.0
+  shared_preferences: ^2.2.0
+  flutter_markdown: ^0.7.0
+  connectivity_plus: ^6.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: fonts/Inter-Regular.ttf
+        - asset: fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: fonts/Inter-Bold.ttf
+          weight: 700
+```
+
+---
+
+## File 2: `mobile_app/lib/main.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'app_state.dart';
+import 'chat_screen.dart';
+import 'settings_screen.dart';
+
+void main() {
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AppState(),
+      child: const MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'LLM Platform',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorSchemeSeed: Colors.blue,
+        useMaterial3: true,
+        fontFamily: 'Inter',
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Check server connectivity on start
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppState>().checkConnection();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: const [
+          ChatScreen(),
+          SettingsScreen(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        destinations: [
+          NavigationDestination(
+            icon: Icon(
+              Icons.chat_bubble_outline,
+              color: appState.isConnected ? null : Colors.red,
+            ),
+            selectedIcon: const Icon(Icons.chat_bubble),
+            label: 'Chat',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+## File 3: `mobile_app/lib/app_state.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
+
+class AppState extends ChangeNotifier {
+  String _tenantId = 'sis';
+  String _serverUrl = 'http://10.0.2.2:8000'; // Android emulator → host
+  bool _useRag = true;
+  bool _isConnected = false;
+  bool _isLoading = false;
+
+  String get tenantId => _tenantId;
+  String get serverUrl => _serverUrl;
+  bool get useRag => _useRag;
+  bool get isConnected => _isConnected;
+  bool get isLoading => _isLoading;
+
+  String get tenantDisplayName =>
+      _tenantId == 'sis' ? 'SIS — Education' : 'MFG — Manufacturing';
+
+  String get tenantEmoji => _tenantId == 'sis' ? '🏫' : '🏭';
+
+  Color get tenantColor =>
+      _tenantId == 'sis' ? Colors.blue : Colors.green;
+
+  AppState() {
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    _tenantId = prefs.getString('tenant_id') ?? 'sis';
+    _serverUrl = prefs.getString('server_url') ?? 'http://10.0.2.2:8000';
+    _useRag = prefs.getBool('use_rag') ?? true;
+    notifyListeners();
+  }
+
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tenant_id', _tenantId);
+    await prefs.setString('server_url', _serverUrl);
+    await prefs.setBool('use_rag', _useRag);
+  }
+
+  void setTenant(String tenant) {
+    _tenantId = tenant;
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void setServerUrl(String url) {
+    _serverUrl = url.trimRight().replaceAll(RegExp(r'/+$'), '');
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void setUseRag(bool value) {
+    _useRag = value;
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void setLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+
+  Future<void> checkConnection() async {
+    try {
+      final api = ApiService(baseUrl: _serverUrl);
+      final health = await api.healthCheck();
+      _isConnected = health['status'] == 'healthy';
+    } catch (e) {
+      _isConnected = false;
+    }
+    notifyListeners();
+  }
+}
+```
+
+---
+
+## File 4: `mobile_app/lib/api_service.dart`
+
+```dart
+import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class Citation {
+  final String title;
+  final String topic;
+  final String sourceFile;
+  final double relevanceScore;
+  final String citationKey;
+
+  Citation({
+    required this.title,
+    required this.topic,
+    required this.sourceFile,
+    required this.relevanceScore,
+    required this.citationKey,
+  });
+
+  factory Citation.fromJson(Map<String, dynamic> json) {
+    return Citation(
+      title: json['title'] ?? '',
+      topic: json['topic'] ?? '',
+      sourceFile: json['source_file'] ?? '',
+      relevanceScore: (json['relevance_score'] ?? 0).toDouble(),
+      citationKey: json['citation_key'] ?? '',
+    );
+  }
+}
+
+class ChatResponseData {
+  final String message;
+  final List<Citation> citations;
+  final String modelType;
+  final String requestId;
+  final double? groundingScore;
+  final double latencyMs;
+  final String retrievalMethod;
+  final bool isCanary;
+
+  ChatResponseData({
+    required this.message,
+    required this.citations,
+    this.modelType = '',
+    this.requestId = '',
+    this.groundingScore,
+    this.latencyMs = 0,
+    this.retrievalMethod = '',
+    this.isCanary = false,
+  });
+
+  factory ChatResponseData.fromJson(Map<String, dynamic> json) {
+    return ChatResponseData(
+      message: json['message'] ?? '',
+      citations: (json['citations'] as List?)
+              ?.map((c) => Citation.fromJson(c))
+              .toList() ??
+          [],
+      modelType: json['model_type'] ?? '',
+      requestId: json['request_id'] ?? '',
+      groundingScore: json['grounding_score']?.toDouble(),
+      latencyMs: (json['latency_ms'] ?? 0).toDouble(),
+      retrievalMethod: json['retrieval_method'] ?? '',
+      isCanary: json['is_canary'] ?? false,
+    );
+  }
+}
+
+class ApiService {
+  final String baseUrl;
+  final Duration timeout;
+
+  ApiService({
+    required this.baseUrl,
+    this.timeout = const Duration(seconds: 60),
+  });
+
+  Future<Map<String, dynamic>> healthCheck() async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/health'))
+        .timeout(const Duration(seconds: 5));
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    }
+    throw Exception('Health check failed: ${response.statusCode}');
+  }
+
+  Future<ChatResponseData> chat({
+    required String tenantId,
+    required String message,
+    List<Map<String, String>> conversationHistory = const [],
+    bool useRag = true,
+    int maxNewTokens = 512,
+    double temperature = 0.7,
+  }) async {
+    final body = json.encode({
+      'tenant_id': tenantId,
+      'message': message,
+      'conversation_history': conversationHistory,
+      'use_rag': useRag,
+      'use_streaming': false,
+      'max_new_tokens': maxNewTokens,
+      'temperature': temperature,
+    });
+
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/chat'),
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        )
+        .timeout(timeout);
+
+    if (response.statusCode == 200) {
+      return ChatResponseData.fromJson(json.decode(response.body));
+    }
+    throw Exception('Chat failed: ${response.statusCode} — ${response.body}');
+  }
+
+  Stream<String> chatStream({
+    required String tenantId,
+    required String message,
+    List<Map<String, String>> conversationHistory = const [],
+    bool useRag = true,
+    int maxNewTokens = 512,
+    double temperature = 0.7,
+  }) async* {
+    final request = http.Request('POST', Uri.parse('$baseUrl/chat/stream'));
+    request.headers['Content-Type'] = 'application/json';
+    request.headers['Accept'] = 'text/event-stream';
+    request.body = json.encode({
+      'tenant_id': tenantId,
+      'message': message,
+      'conversation_history': conversationHistory,
+      'use_rag': useRag,
+      'use_streaming': true,
+      'max_new_tokens': maxNewTokens,
+      'temperature': temperature,
+    });
+
+    final client = http.Client();
+    try {
+      final streamedResponse = await client.send(request).timeout(timeout);
+
+      if (streamedResponse.statusCode != 200) {
+        throw Exception('Stream failed: ${streamedResponse.statusCode}');
+      }
+
+      String buffer = '';
+      await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+        final lines = buffer.split('\n');
+        buffer = lines.removeLast(); // Keep incomplete line in buffer
+
+        for (final line in lines) {
+          if (line.startsWith('data:')) {
+            final dataStr = line.substring(5).trim();
+            if (dataStr.isEmpty) continue;
+
+            try {
+              final data = json.decode(dataStr);
+              if (data['token'] != null) {
+                yield data['token'] as String;
+              }
+              if (data['error'] != null) {
+                yield '\n⚠️ Error: ${data['error']}';
+              }
+            } catch (_) {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> submitFeedback({
+    required String requestId,
+    required String tenantId,
+    required int rating,
+    String? comment,
+  }) async {
+    await http
+        .post(
+          Uri.parse('$baseUrl/feedback'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'request_id': requestId,
+            'tenant_id': tenantId,
+            'rating': rating,
+            'feedback_type': 'thumbs',
+            'comment': comment,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+  }
+
+  Future<Map<String, dynamic>> getStats({String? tenantId}) async {
+    final uri = tenantId != null
+        ? Uri.parse('$baseUrl/stats?tenant_id=$tenantId')
+        : Uri.parse('$baseUrl/stats');
+    final response = await http.get(uri).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    }
+    throw Exception('Stats failed: ${response.statusCode}');
+  }
+}
+```
+
+---
+
+## File 5: `mobile_app/lib/chat_screen.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:provider/provider.dart';
+import 'app_state.dart';
+import 'api_service.dart';
+
+class ChatMessage {
+  final String id;
+  final String role; // 'user' or 'assistant'
+  String content;
+  List<Citation>? citations;
+  Map<String, dynamic>? metadata;
+  bool isStreaming;
+
+  ChatMessage({
+    required this.id,
+    required this.role,
+    required this.content,
+    this.citations,
+    this.metadata,
+    this.isStreaming = false,
+  });
+}
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final List<ChatMessage> _messages = [];
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _focusNode = FocusNode();
+  bool _isLoading = false;
+  String? _currentTenant;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  String _generateId() =>
+      DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+
+  Future<void> _sendMessage() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isLoading) return;
+
+    final appState = context.read<AppState>();
+    final tenantId = appState.tenantId;
+
+    // Clear messages if tenant changed
+    if (_currentTenant != null && _currentTenant != tenantId) {
+      setState(() => _messages.clear());
+    }
+    _currentTenant = tenantId;
+
+    // Add user message
+    final userMsg = ChatMessage(
+      id: _generateId(),
+      role: 'user',
+      content: text,
+    );
+    setState(() {
+      _messages.add(userMsg);
+      _isLoading = true;
+    });
+    _controller.clear();
+    _scrollToBottom();
+
+    final assistantId = _generateId();
+    final api = ApiService(baseUrl: appState.serverUrl);
+
+    // Build conversation history
+    final history = _messages
+        .where((m) => m.role == 'user' || m.role == 'assistant')
+        .take(6)
+        .map((m) => {'role': m.role, 'content': m.content})
+        .toList();
+
+    // Try streaming first, fall back to non-streaming
+    try {
+      // Add empty assistant message for streaming
+      final assistantMsg = ChatMessage(
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+      );
+      setState(() => _messages.add(assistantMsg));
+      _scrollToBottom();
+
+      String fullContent = '';
+
+      await for (final token in api.chatStream(
+        tenantId: tenantId,
+        message: text,
+        conversationHistory: history,
+        useRag: appState.useRag,
+      )) {
+        fullContent += token;
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          if (idx != -1) {
+            _messages[idx].content = fullContent;
+          }
+        });
+        _scrollToBottom();
+      }
+
+      // Finalize
+      setState(() {
+        final idx = _messages.indexWhere((m) => m.id == assistantId);
+        if (idx != -1) {
+          _messages[idx].isStreaming = false;
+        }
+      });
+    } catch (streamError) {
+      // Remove streaming message if it exists
+      setState(() {
+        _messages.removeWhere((m) => m.id == assistantId);
+      });
+
+      // Fall back to non-streaming
+      try {
+        final response = await api.chat(
+          tenantId: tenantId,
+          message: text,
+          conversationHistory: history,
+          useRag: appState.useRag,
+        );
+
+        setState(() {
+          _messages.add(ChatMessage(
+            id: assistantId,
+            role: 'assistant',
+            content: response.message,
+            citations: response.citations,
+            metadata: {
+              'request_id': response.requestId,
+              'model_type': response.modelType,
+              'latency_ms': response.latencyMs,
+              'grounding_score': response.groundingScore,
+              'retrieval_method': response.retrievalMethod,
+            },
+          ));
+        });
+      } catch (chatError) {
+        setState(() {
+          _messages.add(ChatMessage(
+            id: assistantId,
+            role: 'assistant',
+            content:
+                '⚠️ Connection error: ${chatError.toString().replaceAll('Exception: ', '')}\n\nMake sure the server is running.',
+          ));
+        });
+      }
+    }
+
+    setState(() => _isLoading = false);
+    _scrollToBottom();
+  }
+
+  void _submitFeedback(ChatMessage message, int rating) async {
+    final appState = context.read<AppState>();
+    final requestId = message.metadata?['request_id'];
+    if (requestId == null) return;
+
+    try {
+      final api = ApiService(baseUrl: appState.serverUrl);
+      await api.submitFeedback(
+        requestId: requestId,
+        tenantId: appState.tenantId,
+        rating: rating,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(rating >= 4 ? '👍 Thanks!' : '👎 Thanks for the feedback'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Text(appState.tenantEmoji, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${appState.tenantId.toUpperCase()} Assistant',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  appState.isConnected ? 'Connected' : 'Disconnected',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: appState.isConnected ? Colors.green : Colors.red,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          // Tenant toggle
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'sis', label: Text('SIS', style: TextStyle(fontSize: 12))),
+              ButtonSegment(value: 'mfg', label: Text('MFG', style: TextStyle(fontSize: 12))),
+            ],
+            selected: {appState.tenantId},
+            onSelectionChanged: (val) {
+              appState.setTenant(val.first);
+              setState(() => _messages.clear());
+            },
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Clear chat
+          if (_messages.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: () => setState(() => _messages.clear()),
+              tooltip: 'Clear chat',
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Connection warning
+          if (!appState.isConnected)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.orange.shade50,
+              child: Row(
+                children: [
+                  Icon(Icons.wifi_off, size: 16, color: Colors.orange.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Server not reachable. Check connection and server URL in Settings.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => appState.checkConnection(),
+                    child: const Text('Retry', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+
+          // Messages
+          Expanded(
+            child: _messages.isEmpty
+                ? _buildEmptyState(appState)
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) =>
+                        _buildMessageBubble(_messages[index], appState),
+                  ),
+          ),
+
+          // Input area
+          _buildInputArea(appState),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(AppState appState) {
+    final sampleQuestions = appState.tenantId == 'sis'
+        ? [
+            'What documents are needed for enrollment?',
+            'How does FERPA protect student records?',
+            'What happens after 5 unexcused absences?',
+            'What is the grade change procedure?',
+          ]
+        : [
+            'What is the assembly line startup procedure?',
+            'How are critical defects handled?',
+            'What is the lockout/tagout process?',
+            'What triggers a CAPA?',
+          ];
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(appState.tenantEmoji, style: const TextStyle(fontSize: 48)),
+            const SizedBox(height: 12),
+            Text(
+              '${appState.tenantId.toUpperCase()} Assistant',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              appState.tenantId == 'sis'
+                  ? 'Ask about enrollment, attendance, grading, FERPA...'
+                  : 'Ask about SOPs, quality, safety, maintenance...',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey.shade600,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ...sampleQuestions.map((q) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: OutlinedButton(
+                onPressed: () {
+                  _controller.text = q;
+                  _sendMessage();
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Text(q, style: const TextStyle(fontSize: 13)),
+                ),
+              ),
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(ChatMessage message, AppState appState) {
+    final isUser = message.role == 'user';
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.85,
+        ),
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment:
+              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            // Avatar label
+            if (!isUser)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(appState.tenantEmoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${appState.tenantId.toUpperCase()} Assistant',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Message bubble
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? appState.tenantColor
+                    : Colors.white,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isUser ? 16 : 4),
+                  bottomRight: Radius.circular(isUser ? 4 : 16),
+                ),
+                border: isUser ? null : Border.all(color: Colors.grey.shade200),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Content
+                  if (isUser)
+                    Text(
+                      message.content,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    )
+                  else if (message.content.isEmpty && message.isStreaming)
+                    SizedBox(
+                      width: 40,
+                      child: LinearProgressIndicator(
+                        color: appState.tenantColor,
+                        backgroundColor: Colors.grey.shade200,
+                      ),
+                    )
+                  else
+                    MarkdownBody(
+                      data: message.content +
+                          (message.isStreaming ? ' ▋' : ''),
+                      styleSheet: MarkdownStyleSheet(
+                        p: const TextStyle(fontSize: 14, height: 1.4),
+                        code: TextStyle(
+                          fontSize: 12,
+                          backgroundColor: Colors.grey.shade100,
+                        ),
+                      ),
+                    ),
+
+                  // Citations
+                  if (message.citations != null &&
+                      message.citations!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Divider(height: 1, color: Colors.grey.shade200),
+                    const SizedBox(height: 8),
+                    Text(
+                      '📚 Sources',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ...message.citations!.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final c = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: appState.tenantColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${i + 1}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                '${c.title} • ${c.topic}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade700,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              '${(c.relevanceScore * 100).toStringAsFixed(0)}%',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+
+                  // Metadata + feedback
+                  if (!isUser &&
+                      !message.isStreaming &&
+                      message.metadata != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        if (message.metadata!['latency_ms'] != null)
+                          _metaChip(
+                            '⏱ ${(message.metadata!['latency_ms'] as num).round()}ms',
+                          ),
+                        if (message.metadata!['model_type'] != null)
+                          _metaChip('🔧 ${message.metadata!['model_type']}'),
+                        if (message.metadata!['grounding_score'] != null)
+                          _metaChip(
+                            '📐 ${((message.metadata!['grounding_score'] as num) * 100).round()}%',
+                          ),
+                        const Spacer(),
+                        if (message.metadata!['request_id'] != null) ...[
+                          InkWell(
+                            onTap: () => _submitFeedback(message, 5),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Text('👍', style: TextStyle(fontSize: 16)),
+                            ),
+                          ),
+                          InkWell(
+                            onTap: () => _submitFeedback(message, 1),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Text('👎', style: TextStyle(fontSize: 16)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metaChip(String text) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+      ),
+    );
+  }
+
+  Widget _buildInputArea(AppState appState) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Options row
+            Row(
+              children: [
+                FilterChip(
+                  label: const Text('RAG', style: TextStyle(fontSize: 11)),
+                  selected: appState.useRag,
+                  onSelected: (v) => appState.setUseRag(v),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  selectedColor: appState.tenantColor.withOpacity(0.15),
+                ),
+                const Spacer(),
+                if (!appState.isConnected)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_off, size: 14, color: Colors.red.shade300),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Offline',
+                        style: TextStyle(fontSize: 11, color: Colors.red.shade300),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // Input row
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    maxLines: 4,
+                    minLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendMessage(),
+                    enabled: !_isLoading,
+                    decoration: InputDecoration(
+                      hintText: appState.tenantId == 'sis'
+                          ? 'Ask about student information...'
+                          : 'Ask about manufacturing...',
+                      hintStyle: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade400,
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide(color: appState.tenantColor, width: 2),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      isDense: true,
+                    ),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FloatingActionButton.small(
+                  onPressed: _isLoading ? null : _sendMessage,
+                  backgroundColor:
+                      _isLoading ? Colors.grey.shade300 : appState.tenantColor,
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.send, size: 18, color: Colors.white),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## File 6: `mobile_app/lib/settings_screen.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'app_state.dart';
+import 'api_service.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _urlController = TextEditingController();
+  Map<String, dynamic>? _healthData;
+  Map<String, dynamic>? _statsData;
+  bool _isChecking = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final appState = context.read<AppState>();
+    _urlController.text = appState.serverUrl;
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkServer() async {
+    setState(() {
+      _isChecking = true;
+      _error = null;
+      _healthData = null;
+      _statsData = null;
+    });
+
+    final appState = context.read<AppState>();
+    final api = ApiService(baseUrl: appState.serverUrl);
+
+    try {
+      final health = await api.healthCheck();
+      final stats = await api.getStats(tenantId: appState.tenantId);
+
+      setState(() {
+        _healthData = health;
+        _statsData = stats;
+      });
+
+      appState.checkConnection();
+    } catch (e) {
+      setState(() {
+        _error = e.toString().replaceAll('Exception: ', '');
+      });
+    }
+
+    setState(() => _isChecking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Connection section
+          _sectionHeader('Server Connection'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'http://10.0.2.2:8000',
+                      border: OutlineInputBorder(),
+                      helperText: 'Use 10.0.2.2 for Android emulator → host',
+                      isDense: true,
+                    ),
+                    onSubmitted: (val) {
+                      appState.setServerUrl(val);
+                      _checkServer();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _isChecking
+                            ? null
+                            : () {
+                                appState.setServerUrl(_urlController.text);
+                                _checkServer();
+                              },
+                        icon: _isChecking
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.refresh, size: 18),
+                        label: const Text('Test Connection'),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(
+                        appState.isConnected ? Icons.check_circle : Icons.error,
+                        color: appState.isConnected ? Colors.green : Colors.red,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        appState.isConnected ? 'Connected' : 'Disconnected',
+                        style: TextStyle(
+                          color: appState.isConnected ? Colors.green : Colors.red,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Tenant section
+          _sectionHeader('Tenant Configuration'),
+          Card(
+            child: Column(
+              children: [
+                RadioListTile<String>(
+                  title: const Text('🏫 SIS — Education'),
+                  subtitle: const Text(
+                    'Student Information System, FERPA compliance',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: 'sis',
+                  groupValue: appState.tenantId,
+                  onChanged: (v) => appState.setTenant(v!),
+                ),
+                const Divider(height: 1),
+                RadioListTile<String>(
+                  title: const Text('🏭 MFG — Manufacturing'),
+                  subtitle: const Text(
+                    'Quality control, safety protocols, ISO compliance',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: 'mfg',
+                  groupValue: appState.tenantId,
+                  onChanged: (v) => appState.setTenant(v!),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Options section
+          _sectionHeader('Chat Options'),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('RAG Retrieval'),
+                  subtitle: const Text(
+                    'Use knowledge base for grounded answers',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: appState.useRag,
+                  onChanged: (v) => appState.setUseRag(v),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Server info
+          if (_healthData != null) ...[
+            _sectionHeader('Server Status'),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _infoRow('Status', _healthData!['status'] ?? 'unknown'),
+                    _infoRow(
+                      'GPU',
+                      _healthData!['gpu_available'] == true
+                          ? '${_healthData!['gpu_memory_gb'] ?? '?'} GB'
+                          : 'Not available',
+                    ),
+                    _infoRow(
+                      'Uptime',
+                      '${(_healthData!['uptime_seconds'] as num? ?? 0).round()}s',
+                    ),
+                    if (_healthData!['adapters_available'] != null)
+                      _infoRow(
+                        'Adapters',
+                        (_healthData!['adapters_available'] as Map).keys.join(', '),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          if (_statsData != null) ...[
+            const SizedBox(height: 16),
+            _sectionHeader('Usage Stats (${appState.tenantId.toUpperCase()})'),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _infoRow(
+                      'Total Requests',
+                      '${_statsData!['total_requests'] ?? 0}',
+                    ),
+                    _infoRow(
+                      'Avg Latency',
+                      '${(_statsData!['avg_latency_ms'] as num? ?? 0).round()}ms',
+                    ),
+                    _infoRow(
+                      'Avg Grounding',
+                      '${((_statsData!['avg_grounding_score'] as num? ?? 0) * 100).round()}%',
+                    ),
+                    _infoRow(
+                      'Feedback Rating',
+                      '${(_statsData!['avg_feedback_rating'] as num? ?? 0).toStringAsFixed(1)} (${_statsData!['feedback_count'] ?? 0} reviews)',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 32),
+
+          // About
+          Center(
+            child: Text(
+              'Multi-Tenant LLM Platform POC v1.0',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey.shade600,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+## How to run this series
+
+### Option A: Run on Android Emulator
+
+```bash
+cd mobile_app
+
+# Install Flutter dependencies
+flutter pub get
+
+# Run on connected device or emulator
+flutter run
+```
+
+### Option B: Run on Chrome (for quick testing)
+
+```bash
+cd mobile_app
+flutter run -d chrome
+```
+
+### Option C: Build APK
+
+```bash
+cd mobile_app
+flutter build apk --release
+```
+
+### Important: Server URL configuration
+
+| Platform | Default URL | Notes |
+|---|---|---|
+| Android Emulator | `http://10.0.2.2:8000` | `10.0.2.2` maps to host `localhost` |
+| iOS Simulator | `http://localhost:8000` | Direct localhost works |
+| Physical device (WiFi) | `http://YOUR_PC_IP:8000` | Use your machine's local IP |
+| Chrome | `http://localhost:8000` | Direct localhost works |
+
+Change the server URL in the Settings screen within the app.
+
+### Prerequisites
+- Inference server running: `uvicorn inference.main:app --host 0.0.0.0 --port 8000`
+- Flutter SDK installed (v3.16+)
+- Android Studio / Xcode for emulator
+
+---
+
+### What the mobile app looks like
+
+**Chat Screen:**
+```
+┌─────────────────────────────┐
+│ 🏫 SIS Assistant      [SIS│MFG] 🗑 │
+│    Connected                │
+├─────────────────────────────┤
+│                             │
+│ 🏫 SIS Assistant            │
+│ ┌─────────────────────────┐ │
+│ │ For enrollment, students │ │
+│ │ must provide proof of    │ │
+│ │ residency, immunization  │ │
+│ │ records, and birth cert. │ │
+│ │                          │ │
+│ │ 📚 Sources               │ │
+│ │ [1] Enrollment Policy 89%│ │
+│ │ [2] Transfer Proc.   73% │ │
+│ │                          │ │
+│ │ ⏱2340ms 🔧sft 📐85%  👍👎│ │
+│ └─────────────────────────┘ │
+│                             │
+│          ┌─────────────────┐│
+│          │What documents   ││
+│          │are needed for   ││
+│          │enrollment?      ││
+│          └─────────────────┘│
+│                             │
+├─────────────────────────────┤
+│ [RAG ✓]              │
+│ [Ask about student info... ] 🔵│
+├──────────┬──────────────────┤
+│  💬 Chat │  ⚙️ Settings     │
+└──────────┴──────────────────┘
+```
+
+**Settings Screen:**
+```
+┌─────────────────────────────┐
+│ Settings                    │
+├─────────────────────────────┤
+│                             │
+│ Server Connection           │
+│ ┌─────────────────────────┐ │
+│ │ Server URL               │ │
+│ │ [http://10.0.2.2:8000 ] │ │
+│ │                          │ │
+│ │ [Test Connection] ● Conn │ │
+│ └─────────────────────────┘ │
+│                             │
+│ Tenant Configuration        │
+│ ┌─────────────────────────┐ │
+│ │ ◉ 🏫 SIS — Education     │ │
+│ │   Student Information... │ │
+│ │ ○ 🏭 MFG — Manufacturing │ │
+│ │   Quality control...     │ │
+│ └─────────────────────────┘ │
+│                             │
+│ Chat Options                │
+│ ┌─────────────────────────┐ │
+│ │ RAG Retrieval      [✓]  │ │
+│ └─────────────────────────┘ │
+│                             │
+│ Server Status               │
+│ ┌─────────────────────────┐ │
+│ │ Status:    healthy       │ │
+│ │ GPU:       1.2 GB        │ │
+│ │ Uptime:    1234s         │ │
+│ │ Adapters:  sis_sft, ...  │ │
+│ └─────────────────────────┘ │
+│                             │
+│ Usage Stats (SIS)           │
+│ ┌─────────────────────────┐ │
+│ │ Total Requests:  47      │ │
+│ │ Avg Latency:     2340ms  │ │
+│ │ Avg Grounding:   78%     │ │
+│ │ Feedback:  4.2 (12 rev.) │ │
+│ └─────────────────────────┘ │
+├──────────┬──────────────────┤
+│  💬 Chat │  ⚙️ Settings     │
+└──────────┴──────────────────┘
+```
+
+---
+
+### Key features demonstrated
+
+| Feature | Implementation |
+|---|---|
+| **Tenant switching** | SegmentedButton in AppBar + RadioListTile in Settings |
+| **Streaming responses** | SSE stream parsing via HTTP streamed response |
+| **Non-streaming fallback** | Auto-falls back to POST if streaming fails |
+| **Citations** | Numbered source badges with relevance percentage |
+| **Feedback** | 👍/👎 buttons calling feedback API |
+| **Offline indicator** | Connection status banner + cloud_off icon |
+| **Server configuration** | Configurable URL in Settings |
+| **Health check** | Test Connection button with live server status display |
+| **Usage stats** | Request count, latency, grounding score from API |
+| **RAG toggle** | FilterChip to enable/disable retrieval |
+| **Sample questions** | Tappable domain-specific questions on empty state |
+| **Markdown rendering** | flutter_markdown for formatted responses |
+| **Persistent preferences** | SharedPreferences for tenant, URL, options |
+| **State management** | Provider pattern with ChangeNotifier |
+| **Auto-clear on tenant switch** | Messages clear when switching tenants |
+| **Loading state** | Spinner on send button + linear progress in bubble |
+| **Tenant theming** | Blue for SIS, green for MFG throughout |
+
+---
+
+### Differences from the web app (intentional for mobile)
+
+| Aspect | Web | Mobile |
+|---|---|---|
+| Streaming | EventSource API | HTTP streamed response parsing |
+| Layout | Side-by-side panels | Single column, bottom nav |
+| Compare mode | Two chat panels | Not included (screen too small) |
+| Monitoring | Full dashboard | Stats in Settings screen |
+| Offline | N/A | Connection banner + offline indicator |
+| Server URL | Proxied via Next.js | Configurable in Settings |
+
+---
+
+**Next: Series 8 — Voice Agent (`voice_agent/`)**
+
+Shall I continue with Series 8?

@@ -1,0 +1,51 @@
+# Core ML
+torch>=2.1.0
+transformers>=4.38.0
+accelerate>=0.27.0
+bitsandbytes>=0.42.0
+peft>=0.9.0
+trl>=0.7.0
+datasets>=2.18.0
+sentencepiece
+protobuf
+
+# API / Backend
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sse-starlette>=1.8.0
+pydantic>=2.6.0
+python-dotenv
+httpx
+aiofiles
+websockets
+
+# RAG / Vector DB
+chromadb>=0.4.22
+sentence-transformers>=2.5.0
+
+# Data processing
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn
+nltk
+pypdf>=4.0.0
+python-docx
+
+# Evaluation
+rouge-score
+
+# MLOps / Tracking
+mlflow>=2.11.0
+
+# Voice
+faster-whisper>=0.10.0
+edge-tts>=6.1.0
+
+# Frontend / Dashboard
+streamlit>=1.31.0
+
+# Utilities
+loguru
+jinja2
+psutil
+pyyaml

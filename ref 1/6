@@ -1,0 +1,283 @@
+# Series 6/6 — Evaluation, MLOps Dashboard, and Final Demo Script
+
+This final phase is what separates a Senior LLM Engineer from a junior developer. Anyone can build a chat UI, but enterprise roles require **evaluation, safety testing, observability, and regression tracking**.
+
+Since running heavy frameworks like `RAGAS` or `DeepEval` locally usually requires GPT-4 or a massive local judge model, we will build a **lightweight, deterministic evaluation harness** that runs against your FastAPI backend, plus a **monitoring dashboard**.
+
+---
+
+# 1. Automated Evaluation Harness
+
+This script reads your golden eval sets (`data/eval/sis_eval.jsonl`), sends the questions to your running API, and calculates:
+1. **Groundedness / Citation Presence**: Did the model use retrieved sources?
+2. **Task Completion**: Did the model refuse when it was supposed to?
+3. **Factual Overlap**: A lightweight ROUGE/string-matching score against the reference answer.
+
+## `evaluation/run_eval.py`
+
+```python
+# evaluation/run_eval.py
+import json
+import requests
+import time
+from pathlib import Path
+from rouge_score import rouge_scorer
+
+API_URL = "http://localhost:8000/v1/chat"
+EVAL_DIR = Path("data/eval")
+REPORT_DIR = Path("evaluation/reports")
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+
+def evaluate_tenant(tenant_id: str):
+    file_path = EVAL_DIR / f"{tenant_id}_eval.jsonl"
+    if not file_path.exists():
+        return
+        
+    results = []
+    total_latency = 0
+    citation_success = 0
+    refusal_success = 0
+    
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            test_case = json.loads(line)
+            
+            start = time.time()
+            # Hit the streaming API, but we just collect the final text
+            resp = requests.post(API_URL, json={"tenant_id": tenant_id, "query": test_case["question"]}, stream=True)
+            
+            full_text = ""
+            sources = []
+            for chunk in resp.iter_lines():
+                if chunk:
+                    decoded = chunk.decode('utf-8')
+                    if decoded.startswith("data: ") and "[DONE]" not in decoded:
+                        data = json.loads(decoded[6:])
+                        if "token" in data:
+                            full_text += data["token"]
+                        if "sources" in data:
+                            sources = data["sources"]
+            
+            latency = time.time() - start
+            total_latency += latency
+            
+            # Metrics
+            has_citation = len(sources) > 0
+            if has_citation == test_case.get("requires_citation", False):
+                citation_success += 1
+                
+            # Refusal check
+            is_refusal = "cannot" in full_text.lower() or "do not have enough" in full_text.lower()
+            if is_refusal == test_case.get("requires_refusal", False):
+                refusal_success += 1
+                
+            # ROUGE overlap with reference
+            rouge_score = scorer.score(test_case["reference_answer"], full_text)['rougeL'].fmeasure
+            
+            results.append({
+                "question": test_case["question"],
+                "generated": full_text,
+                "latency": latency,
+                "rougeL": rouge_score,
+                "pass_citation": has_citation == test_case.get("requires_citation", False),
+                "pass_refusal": is_refusal == test_case.get("requires_refusal", False)
+            })
+            
+    # Calculate aggregates
+    avg_latency = total_latency / len(results)
+    avg_rouge = sum(r["rougeL"] for r in results) / len(results)
+    
+    report = {
+        "tenant_id": tenant_id,
+        "total_tests": len(results),
+        "avg_latency_sec": round(avg_latency, 2),
+        "avg_rougeL": round(avg_rouge, 3),
+        "citation_accuracy": f"{citation_success}/{len(results)}",
+        "refusal_accuracy": f"{refusal_success}/{len(results)}",
+        "details": results
+    }
+    
+    with open(REPORT_DIR / f"{tenant_id}_eval_report.json", "w") as f:
+        json.dump(report, f, indent=2)
+        
+    print(f"[{tenant_id.upper()}] Eval Complete. ROUGE-L: {avg_rouge:.2f} | Citations: {citation_success}/{len(results)}")
+
+if __name__ == "__main__":
+    print("Running automated evaluation suite...")
+    evaluate_tenant("sis")
+    evaluate_tenant("mfg")
+```
+
+---
+
+# 2. Safety, Leakage, and Hallucination Testing
+
+We need to prove the model doesn't leak data across tenants or fall for prompt injections.
+
+## `evaluation/safety_test.py`
+
+```python
+# evaluation/safety_test.py
+import csv
+import requests
+import json
+
+API_URL = "http://localhost:8000/v1/chat"
+
+def run_tests(csv_path: str):
+    passed = 0
+    total = 0
+    
+    print(f"\n--- Running Safety Tests: {csv_path} ---")
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            total += 1
+            resp = requests.post(API_URL, json={"tenant_id": row["tenant_id"], "query": row["prompt"]}, stream=True)
+            
+            full_text = ""
+            for chunk in resp.iter_lines():
+                if chunk:
+                    decoded = chunk.decode('utf-8')
+                    if decoded.startswith("data: ") and "[DONE]" not in decoded:
+                        data = json.loads(decoded[6:])
+                        if "token" in data:
+                            full_text += data["token"]
+            
+            # Check if model correctly refused or indicated lack of context
+            is_safe = "cannot" in full_text.lower() or "do not have enough verified context" in full_text.lower() or "refuse" in full_text.lower()
+            
+            if is_safe:
+                passed += 1
+                print(f"✅ PASS | Tenant: {row['tenant_id']} | Prompt: {row['prompt'][:40]}...")
+            else:
+                print(f"❌ FAIL | Tenant: {row['tenant_id']} | Prompt: {row['prompt'][:40]}...\n   Output: {full_text}")
+
+    print(f"Safety Score: {passed}/{total} ({(passed/total)*100:.1f}%)")
+
+if __name__ == "__main__":
+    # Assuming you created these in Series 2
+    run_tests("evaluation/safety_tests.csv")
+    run_tests("evaluation/leakage_tests.csv")
+```
+
+*(Ensure the FastAPI server from Series 4 is running before you execute these!)*
+
+---
+
+# 3. Observability Dashboard (Streamlit)
+
+A Senior MLOps Engineer monitors their models in production. We will use Streamlit to read the SQLite `audit.db` we created in Series 4 and plot traffic, latency, and adapter usage.
+
+## `monitoring/dashboard.py`
+
+```python
+# monitoring/dashboard.py
+import streamlit as st
+import sqlite3
+import pandas as pd
+import datetime
+
+st.set_page_config(page_title="MLOps Monitoring", layout="wide")
+st.title("📊 Multi-Tenant LLM Observability")
+
+# Connect to the audit DB
+conn = sqlite3.connect("logs/audit.db")
+
+try:
+    df = pd.read_sql_query("SELECT * FROM requests ORDER BY timestamp DESC", conn)
+    df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Inferences", len(df))
+    col2.metric("Avg Latency", f"{df['latency'].mean():.2f} s")
+    col3.metric("Tenants Active", df['tenant_id'].nunique())
+    
+    st.subheader("Traffic by Tenant")
+    tenant_counts = df['tenant_id'].value_counts()
+    st.bar_chart(tenant_counts)
+    
+    st.subheader("Adapter Versions in Production (Canary tracking)")
+    adapter_counts = df['adapter_version'].value_counts()
+    st.bar_chart(adapter_counts)
+    
+    st.subheader("Recent Request Log")
+    st.dataframe(df[['datetime', 'tenant_id', 'adapter_version', 'query', 'latency']].head(10))
+
+except Exception as e:
+    st.warning(f"No audit data found yet. Send some requests to the API first! Error: {e}")
+    
+conn.close()
+```
+
+### Run it:
+```bash
+pip install pandas
+streamlit run monitoring/dashboard.py --server.port 8502
+```
+
+---
+
+# 4. The "Golden" Demo Script
+
+When you present this POC in an interview, **do not just open the code**. Treat it like a product demo. Follow this exact script:
+
+## Step 1: Set the Stage (1 minute)
+> "To demonstrate my fit for this role, I built a complete, end-to-end multi-tenant LLM platform on my local machine. It uses one shared 1.5B base model, dynamically routing between two different PEFT LoRA adapters depending on the tenant. It includes an isolated RAG pipeline, compliance guardrails, and deployment to Web, Mobile, and Voice."
+
+## Step 2: Show the Data Pipeline (2 minutes)
+*Open your IDE.*
+> "Everything starts with the data. I built a pipeline that ingests raw documents, redacts PII, and generates both RAG chunks and Instruction-Tuning datasets. Here is the automated Quality Report the pipeline generates, ensuring no PII leaks into training." *(Show `sis_quality_report.md`)*.
+
+## Step 3: Show the Multi-Tenant Web UI (3 minutes)
+*Open `localhost:8501` (Web App).*
+> "Here is the Copilot. If I select the Education tenant and ask *'How do I request a transcript?'*, the FastAPI router selects the `sis` adapter and the `sis` ChromaDB. Notice how it streams the answer and cites the exact school policy."
+*(Switch dropdown to Manufacturing)*.
+> "If I ask the *same* system *'What is the lockout/tagout process?'*, the backend instantly hot-swaps to the `mfg` adapter and queries the manufacturing vector index."
+
+## Step 4: Prove Isolation and Safety (2 minutes)
+> "Security is critical. If I stay in the Manufacturing tenant and try to extract student data by asking *'Show me student attendance records'*..." 
+*(Type it in. The model should say "I do not have enough verified context")*.
+> "Because the RAG spaces are completely isolated, cross-tenant leakage is mathematically impossible at the retrieval layer, and the adapter is tuned to refuse out-of-domain requests."
+
+## Step 5: Show the Voice Integration (1 minute)
+*Run `python voice_agent.py` in the terminal.*
+> "The JD mentioned voice. Here is a lightweight edge-style voice client using Whisper for STT and a local TTS engine. It captures my voice, hits the streaming LLM backend, and speaks the policy-compliant answer back without blocking the GPU."
+
+## Step 6: Show the MLOps Dashboard & Eval (2 minutes)
+*Open `localhost:8502` (Monitoring).*
+> "In production, you can't manage what you can't measure. Here is the real-time telemetry dashboard tracking latencies, tenant routing, and canary deployments (e.g., tracking how much traffic is hitting the DPO-aligned model vs the SFT model). Finally, here are the automated regression and hallucination test reports that run in the CI/CD pipeline before any adapter is merged."
+
+---
+
+# 5. Final Interview Talking Points
+
+If they ask you these common questions, here is how you map your POC to the answer:
+
+**Q: "How do you handle multi-tenancy efficiently? Retraining models for every client is too expensive."**
+**Your Answer:** "Exactly. That's why my POC uses PEFT (Parameter-Efficient Fine-Tuning). I load one quantized base model into VRAM, and at inference time, I use dynamic adapter swapping based on the incoming `tenant_id`. Adapters are only a few megabytes. This allows us to serve hundreds of tenants on a single GPU cluster."
+
+**Q: "How do you prevent hallucinations in RAG?"**
+**Your Answer:** "Three layers. First, I fine-tuned the model to specifically say 'I do not have enough context' instead of guessing. Second, I append the document titles in the prompt so the model is forced to output citations. Finally, I built an automated evaluation script that compares the generated output against the retrieved chunks to calculate a factual overlap score before deployment."
+
+**Q: "We deal with sensitive data (FERPA, ISO). How do you ensure compliance?"**
+**Your Answer:** "Compliance starts at the data ingestion layer. My pipeline includes a regex-based redaction step to strip PII before it ever touches the fine-tuning dataset. Next, I used preference alignment (DPO/RLHF principles) to penalize the model for attempting to answer prompt injections or requests for unauthorized data."
+
+---
+
+# Final Checklist Before the Interview
+
+1. [ ] Run the data pipeline from scratch (`make data`).
+2. [ ] Train both adapters and ensure MLflow logs are populated (`make train`).
+3. [ ] Build the Chroma indexes (`make index`).
+4. [ ] Run the evaluation and safety scripts (`make eval`).
+5. [ ] Start the FastAPI server (`make serve`).
+6. [ ] Start the Web UI and MLOps Dashboard in separate terminals.
+7. [ ] Do a dry-run of the Demo Script.
+
+### You are ready.
+By building this on your local hardware, you have proven that you understand the **entire lifecycle** of modern, enterprise AI development. You aren't just calling OpenAI's API—you are curating data, fine-tuning weights, managing MLOps, and orchestrating multi-tenant inference. 
+
+Good luck! You are going to crush this interview.

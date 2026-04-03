@@ -1,0 +1,1419 @@
+
+
+# Series 8 of 10: Voice Agent (`voice_agent/`)
+
+This covers the complete voice pipeline: real-time speech-to-text (Whisper), LLM inference with tenant routing, text-to-speech (edge-tts), WebSocket orchestration, turn-taking, and a browser-based voice interface.
+
+---
+
+## File 1: `voice_agent/__init__.py`
+
+```python
+"""Voice agent pipeline: STT → LLM → TTS with tenant-aware routing."""
+```
+
+---
+
+## File 2: `voice_agent/config.py`
+
+```python
+"""Voice agent configuration."""
+import os
+from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+@dataclass
+class VoiceConfig:
+    # STT (Speech-to-Text)
+    whisper_model: str = "base"  # tiny, base, small — fits 8GB with LLM
+    whisper_device: str = "cpu"  # Keep on CPU to save GPU for LLM
+    whisper_language: str = "en"
+
+    # TTS (Text-to-Speech)
+    tts_engine: str = "edge-tts"  # edge-tts is free and fast
+    tts_voice_sis: str = "en-US-JennyNeural"
+    tts_voice_mfg: str = "en-US-GuyNeural"
+    tts_rate: str = "+10%"  # Slightly faster speech
+
+    # Server
+    voice_port: int = int(os.getenv("VOICE_PORT", "8001"))
+    inference_url: str = os.getenv("INFERENCE_URL", "http://localhost:8000")
+
+    # Audio
+    sample_rate: int = 16000
+    channels: int = 1
+    chunk_duration_ms: int = 30  # WebRTC standard
+
+    # Pipeline
+    silence_threshold: float = 0.01
+    silence_duration_s: float = 1.5  # Silence before processing
+    max_recording_s: float = 30.0  # Maximum recording length
+    min_recording_s: float = 0.5  # Minimum recording length
+
+
+VOICE_CONFIG = VoiceConfig()
+```
+
+---
+
+## File 3: `voice_agent/stt_engine.py`
+
+```python
+"""
+Speech-to-Text engine using faster-whisper.
+Runs on CPU to keep GPU free for LLM inference.
+"""
+import time
+import io
+import numpy as np
+from typing import Optional, Dict
+from pathlib import Path
+
+from loguru import logger
+
+from voice_agent.config import VOICE_CONFIG
+
+# Lazy-loaded model
+_whisper_model = None
+_model_lock = None
+
+
+def get_whisper_model():
+    """Load Whisper model (singleton, lazy-loaded)."""
+    global _whisper_model, _model_lock
+
+    if _model_lock is None:
+        import threading
+        _model_lock = threading.Lock()
+
+    if _whisper_model is not None:
+        return _whisper_model
+
+    with _model_lock:
+        if _whisper_model is not None:
+            return _whisper_model
+
+        try:
+            from faster_whisper import WhisperModel
+            logger.info(f"Loading faster-whisper model: {VOICE_CONFIG.whisper_model}")
+            _whisper_model = WhisperModel(
+                VOICE_CONFIG.whisper_model,
+                device=VOICE_CONFIG.whisper_device,
+                compute_type="int8",  # CPU-optimized
+            )
+            logger.info("Whisper model loaded (faster-whisper)")
+            return _whisper_model
+        except ImportError:
+            logger.info("faster-whisper not available, trying openai-whisper")
+
+        try:
+            import whisper
+            logger.info(f"Loading openai-whisper model: {VOICE_CONFIG.whisper_model}")
+            _whisper_model = whisper.load_model(
+                VOICE_CONFIG.whisper_model,
+                device=VOICE_CONFIG.whisper_device,
+            )
+            logger.info("Whisper model loaded (openai-whisper)")
+            return _whisper_model
+        except ImportError:
+            logger.error("No whisper library available. Install faster-whisper or openai-whisper.")
+            raise
+
+
+def transcribe_audio(
+    audio_data: np.ndarray,
+    sample_rate: int = 16000,
+    language: str = "en",
+) -> Dict:
+    """
+    Transcribe audio data to text.
+
+    Args:
+        audio_data: numpy array of float32 audio samples
+        sample_rate: Audio sample rate
+        language: Language code
+
+    Returns:
+        Dict with 'text', 'language', 'duration_s', 'transcription_time_s'
+    """
+    model = get_whisper_model()
+    t_start = time.time()
+
+    # Normalize audio
+    if audio_data.dtype != np.float32:
+        audio_data = audio_data.astype(np.float32)
+
+    if np.max(np.abs(audio_data)) > 1.0:
+        audio_data = audio_data / 32768.0  # int16 to float32
+
+    duration_s = len(audio_data) / sample_rate
+
+    try:
+        # Try faster-whisper API
+        if hasattr(model, 'transcribe') and not hasattr(model, 'decode'):
+            segments, info = model.transcribe(
+                audio_data,
+                language=language,
+                beam_size=1,
+                best_of=1,
+                vad_filter=True,
+            )
+            text = " ".join(segment.text for segment in segments).strip()
+            detected_language = info.language if hasattr(info, 'language') else language
+        else:
+            # openai-whisper API
+            result = model.transcribe(
+                audio_data,
+                language=language,
+                fp16=False,
+            )
+            text = result.get("text", "").strip()
+            detected_language = result.get("language", language)
+
+    except Exception as e:
+        logger.error(f"Transcription failed: {e}")
+        text = ""
+        detected_language = language
+
+    transcription_time = round(time.time() - t_start, 3)
+
+    logger.info(
+        f"STT: '{text[:80]}{'...' if len(text) > 80 else ''}' "
+        f"({duration_s:.1f}s audio → {transcription_time}s transcription)"
+    )
+
+    return {
+        "text": text,
+        "language": detected_language,
+        "duration_s": round(duration_s, 2),
+        "transcription_time_s": transcription_time,
+        "realtime_factor": round(transcription_time / max(duration_s, 0.01), 2),
+    }
+
+
+def transcribe_wav_bytes(wav_bytes: bytes) -> Dict:
+    """Transcribe from WAV file bytes."""
+    import wave
+
+    with io.BytesIO(wav_bytes) as wav_io:
+        with wave.open(wav_io, 'rb') as wf:
+            sample_rate = wf.getframerate()
+            n_channels = wf.getnchannels()
+            sample_width = wf.getsampwidth()
+            frames = wf.readframes(wf.getnframes())
+
+    # Convert to numpy
+    if sample_width == 2:
+        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sample_width == 4:
+        audio = np.frombuffer(frames, dtype=np.int32).astype(np.float32) / 2147483648.0
+    else:
+        audio = np.frombuffer(frames, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
+
+    # Convert to mono if stereo
+    if n_channels > 1:
+        audio = audio.reshape(-1, n_channels).mean(axis=1)
+
+    return transcribe_audio(audio, sample_rate)
+
+
+if __name__ == "__main__":
+    # Test with a simple audio generation
+    print("Testing STT engine...")
+
+    # Generate silent audio (should transcribe to empty or noise)
+    test_audio = np.zeros(16000 * 2, dtype=np.float32)  # 2 seconds silence
+    result = transcribe_audio(test_audio)
+    print(f"Result: {result}")
+```
+
+---
+
+## File 4: `voice_agent/tts_engine.py`
+
+```python
+"""
+Text-to-Speech engine using edge-tts.
+Free, fast, and doesn't require API keys.
+Supports tenant-specific voices.
+"""
+import io
+import asyncio
+import time
+import tempfile
+from typing import Optional, AsyncGenerator
+from pathlib import Path
+
+from loguru import logger
+
+from voice_agent.config import VOICE_CONFIG
+
+
+async def synthesize_speech(
+    text: str,
+    tenant_id: str = "sis",
+    output_path: Optional[str] = None,
+) -> bytes:
+    """
+    Synthesize speech from text using edge-tts.
+
+    Args:
+        text: Text to speak
+        tenant_id: Tenant ID for voice selection
+        output_path: Optional file path to save audio
+
+    Returns:
+        MP3 audio bytes
+    """
+    import edge_tts
+
+    # Select voice based on tenant
+    voice = (
+        VOICE_CONFIG.tts_voice_sis
+        if tenant_id == "sis"
+        else VOICE_CONFIG.tts_voice_mfg
+    )
+
+    t_start = time.time()
+
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=voice,
+        rate=VOICE_CONFIG.tts_rate,
+    )
+
+    # Collect audio bytes
+    audio_chunks = []
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_chunks.append(chunk["data"])
+
+    audio_bytes = b"".join(audio_chunks)
+    tts_time = round(time.time() - t_start, 3)
+
+    logger.info(
+        f"TTS: {len(text)} chars → {len(audio_bytes)} bytes "
+        f"({tts_time}s, voice={voice})"
+    )
+
+    # Save to file if requested
+    if output_path:
+        Path(output_path).write_bytes(audio_bytes)
+
+    return audio_bytes
+
+
+async def synthesize_speech_streaming(
+    text: str,
+    tenant_id: str = "sis",
+) -> AsyncGenerator[bytes, None]:
+    """
+    Stream TTS audio chunks as they're generated.
+    Yields MP3 audio chunks for real-time playback.
+    """
+    import edge_tts
+
+    voice = (
+        VOICE_CONFIG.tts_voice_sis
+        if tenant_id == "sis"
+        else VOICE_CONFIG.tts_voice_mfg
+    )
+
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=voice,
+        rate=VOICE_CONFIG.tts_rate,
+    )
+
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            yield chunk["data"]
+
+
+def synthesize_speech_sync(text: str, tenant_id: str = "sis") -> bytes:
+    """Synchronous wrapper for TTS synthesis."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're inside an async context, create a new thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    synthesize_speech(text, tenant_id),
+                )
+                return future.result()
+        else:
+            return loop.run_until_complete(synthesize_speech(text, tenant_id))
+    except RuntimeError:
+        return asyncio.run(synthesize_speech(text, tenant_id))
+
+
+async def list_voices(language: str = "en") -> list:
+    """List available TTS voices for a language."""
+    import edge_tts
+    voices = await edge_tts.list_voices()
+    return [
+        {"name": v["ShortName"], "gender": v["Gender"], "locale": v["Locale"]}
+        for v in voices
+        if v["Locale"].startswith(language)
+    ]
+
+
+if __name__ == "__main__":
+    async def test():
+        print("Testing TTS engine...")
+
+        # Test SIS voice
+        audio = await synthesize_speech(
+            "The enrollment process requires proof of residency and immunization records.",
+            tenant_id="sis",
+            output_path="test_sis_voice.mp3",
+        )
+        print(f"SIS voice: {len(audio)} bytes → test_sis_voice.mp3")
+
+        # Test MFG voice
+        audio = await synthesize_speech(
+            "The lockout tagout procedure must be followed for all maintenance activities.",
+            tenant_id="mfg",
+            output_path="test_mfg_voice.mp3",
+        )
+        print(f"MFG voice: {len(audio)} bytes → test_mfg_voice.mp3")
+
+        # List voices
+        voices = await list_voices("en")
+        print(f"\nAvailable English voices: {len(voices)}")
+        for v in voices[:10]:
+            print(f"  {v['name']} ({v['gender']})")
+
+    asyncio.run(test())
+```
+
+---
+
+## File 5: `voice_agent/voice_pipeline.py`
+
+```python
+"""
+Complete voice pipeline: STT → LLM (via inference API) → TTS
+Orchestrates the full voice conversation flow.
+"""
+import time
+import asyncio
+import json
+import numpy as np
+from typing import Dict, Optional, Callable, AsyncGenerator
+from dataclasses import dataclass, field
+
+import httpx
+from loguru import logger
+
+from voice_agent.config import VOICE_CONFIG
+from voice_agent.stt_engine import transcribe_audio
+from voice_agent.tts_engine import synthesize_speech, synthesize_speech_streaming
+
+
+@dataclass
+class VoiceTurn:
+    """A single turn in the voice conversation."""
+    turn_id: int
+    user_audio_duration_s: float = 0.0
+    user_text: str = ""
+    assistant_text: str = ""
+    assistant_audio_bytes: int = 0
+    stt_time_s: float = 0.0
+    llm_time_s: float = 0.0
+    tts_time_s: float = 0.0
+    total_time_s: float = 0.0
+    tenant_id: str = ""
+    model_type: str = ""
+
+
+@dataclass
+class ConversationState:
+    """Tracks the state of a voice conversation."""
+    session_id: str
+    tenant_id: str
+    turns: list = field(default_factory=list)
+    history: list = field(default_factory=list)
+    is_active: bool = True
+    created_at: float = field(default_factory=time.time)
+
+    def add_turn(self, user_text: str, assistant_text: str):
+        self.history.append({"role": "user", "content": user_text})
+        self.history.append({"role": "assistant", "content": assistant_text})
+        # Keep last 6 messages (3 turns)
+        if len(self.history) > 6:
+            self.history = self.history[-6:]
+
+
+class VoicePipeline:
+    """
+    End-to-end voice pipeline.
+    STT (Whisper) → LLM (inference API) → TTS (edge-tts)
+    """
+
+    def __init__(
+        self,
+        inference_url: str = None,
+    ):
+        self.inference_url = inference_url or VOICE_CONFIG.inference_url
+        self._sessions: Dict[str, ConversationState] = {}
+
+    def create_session(self, tenant_id: str) -> ConversationState:
+        """Create a new conversation session."""
+        session_id = f"voice_{int(time.time()*1000)}"
+        session = ConversationState(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        self._sessions[session_id] = session
+        logger.info(f"Voice session created: {session_id} (tenant: {tenant_id})")
+        return session
+
+    def get_session(self, session_id: str) -> Optional[ConversationState]:
+        return self._sessions.get(session_id)
+
+    async def process_audio(
+        self,
+        audio_data: np.ndarray,
+        session: ConversationState,
+        sample_rate: int = 16000,
+    ) -> Dict:
+        """
+        Process a complete audio utterance through the full pipeline.
+
+        Args:
+            audio_data: numpy float32 audio
+            session: Conversation state
+            sample_rate: Audio sample rate
+
+        Returns:
+            Dict with text, audio, and timing information
+        """
+        t_total_start = time.time()
+        turn_id = len(session.turns) + 1
+        tenant_id = session.tenant_id
+
+        # ---- Step 1: STT ----
+        t_stt_start = time.time()
+        stt_result = transcribe_audio(audio_data, sample_rate)
+        stt_time = time.time() - t_stt_start
+
+        user_text = stt_result["text"]
+
+        if not user_text.strip():
+            return {
+                "status": "empty",
+                "message": "No speech detected",
+                "stt_time_s": round(stt_time, 3),
+            }
+
+        logger.info(f"[Turn {turn_id}] User: '{user_text}'")
+
+        # ---- Step 2: LLM Inference ----
+        t_llm_start = time.time()
+        try:
+            llm_response = await self._call_inference(
+                user_text, tenant_id, session.history
+            )
+            assistant_text = llm_response.get("message", "I couldn't generate a response.")
+            model_type = llm_response.get("model_type", "")
+        except Exception as e:
+            logger.error(f"LLM inference failed: {e}")
+            assistant_text = "I'm sorry, I'm having trouble responding right now. Please try again."
+            model_type = "error"
+        llm_time = time.time() - t_llm_start
+
+        logger.info(f"[Turn {turn_id}] Assistant: '{assistant_text[:100]}...'")
+
+        # ---- Step 3: TTS ----
+        t_tts_start = time.time()
+        try:
+            audio_bytes = await synthesize_speech(assistant_text, tenant_id)
+        except Exception as e:
+            logger.error(f"TTS failed: {e}")
+            audio_bytes = b""
+        tts_time = time.time() - t_tts_start
+
+        total_time = time.time() - t_total_start
+
+        # Update session
+        session.add_turn(user_text, assistant_text)
+
+        turn = VoiceTurn(
+            turn_id=turn_id,
+            user_audio_duration_s=stt_result["duration_s"],
+            user_text=user_text,
+            assistant_text=assistant_text,
+            assistant_audio_bytes=len(audio_bytes),
+            stt_time_s=round(stt_time, 3),
+            llm_time_s=round(llm_time, 3),
+            tts_time_s=round(tts_time, 3),
+            total_time_s=round(total_time, 3),
+            tenant_id=tenant_id,
+            model_type=model_type,
+        )
+        session.turns.append(turn)
+
+        logger.info(
+            f"[Turn {turn_id}] Pipeline: STT={stt_time:.2f}s → "
+            f"LLM={llm_time:.2f}s → TTS={tts_time:.2f}s = "
+            f"Total={total_time:.2f}s"
+        )
+
+        return {
+            "status": "success",
+            "turn_id": turn_id,
+            "user_text": user_text,
+            "assistant_text": assistant_text,
+            "audio_bytes": audio_bytes,
+            "audio_format": "mp3",
+            "timing": {
+                "stt_s": turn.stt_time_s,
+                "llm_s": turn.llm_time_s,
+                "tts_s": turn.tts_time_s,
+                "total_s": turn.total_time_s,
+                "audio_duration_s": turn.user_audio_duration_s,
+            },
+            "model_type": model_type,
+            "session_id": session.session_id,
+        }
+
+    async def process_audio_streaming(
+        self,
+        audio_data: np.ndarray,
+        session: ConversationState,
+        sample_rate: int = 16000,
+    ) -> AsyncGenerator[Dict, None]:
+        """
+        Process audio with streaming results.
+        Yields intermediate results as they become available.
+        """
+        t_start = time.time()
+        tenant_id = session.tenant_id
+
+        # Step 1: STT
+        yield {"event": "stt_start", "timestamp": time.time()}
+        stt_result = transcribe_audio(audio_data, sample_rate)
+        user_text = stt_result["text"]
+        yield {
+            "event": "stt_complete",
+            "text": user_text,
+            "duration_s": stt_result["duration_s"],
+            "stt_time_s": stt_result["transcription_time_s"],
+        }
+
+        if not user_text.strip():
+            yield {"event": "empty", "message": "No speech detected"}
+            return
+
+        # Step 2: LLM
+        yield {"event": "llm_start", "timestamp": time.time()}
+        try:
+            llm_response = await self._call_inference(
+                user_text, tenant_id, session.history
+            )
+            assistant_text = llm_response.get("message", "")
+        except Exception as e:
+            assistant_text = "I'm having trouble responding right now."
+            yield {"event": "llm_error", "error": str(e)}
+
+        yield {
+            "event": "llm_complete",
+            "text": assistant_text,
+            "llm_time_s": round(time.time() - t_start, 3),
+        }
+
+        # Step 3: TTS (streaming)
+        yield {"event": "tts_start", "timestamp": time.time()}
+        try:
+            async for audio_chunk in synthesize_speech_streaming(
+                assistant_text, tenant_id
+            ):
+                yield {"event": "audio_chunk", "data": audio_chunk}
+        except Exception as e:
+            yield {"event": "tts_error", "error": str(e)}
+
+        session.add_turn(user_text, assistant_text)
+
+        yield {
+            "event": "complete",
+            "total_time_s": round(time.time() - t_start, 3),
+            "user_text": user_text,
+            "assistant_text": assistant_text,
+        }
+
+    async def _call_inference(
+        self,
+        message: str,
+        tenant_id: str,
+        history: list,
+    ) -> Dict:
+        """Call the inference API."""
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{self.inference_url}/chat",
+                json={
+                    "tenant_id": tenant_id,
+                    "message": message,
+                    "conversation_history": history[-6:],
+                    "use_rag": True,
+                    "use_streaming": False,
+                    "max_new_tokens": 256,  # Shorter for voice
+                    "temperature": 0.7,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def get_session_summary(self, session_id: str) -> Optional[Dict]:
+        """Get summary of a voice session."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return None
+
+        turns = session.turns
+        if not turns:
+            return {"session_id": session_id, "turns": 0}
+
+        return {
+            "session_id": session_id,
+            "tenant_id": session.tenant_id,
+            "total_turns": len(turns),
+            "avg_total_time_s": round(
+                sum(t.total_time_s for t in turns) / len(turns), 2
+            ),
+            "avg_stt_time_s": round(
+                sum(t.stt_time_s for t in turns) / len(turns), 2
+            ),
+            "avg_llm_time_s": round(
+                sum(t.llm_time_s for t in turns) / len(turns), 2
+            ),
+            "avg_tts_time_s": round(
+                sum(t.tts_time_s for t in turns) / len(turns), 2
+            ),
+            "turns": [
+                {
+                    "turn_id": t.turn_id,
+                    "user": t.user_text[:100],
+                    "assistant": t.assistant_text[:100],
+                    "total_s": t.total_time_s,
+                }
+                for t in turns
+            ],
+        }
+
+
+# Module-level singleton
+_pipeline: Optional[VoicePipeline] = None
+
+
+def get_voice_pipeline() -> VoicePipeline:
+    global _pipeline
+    if _pipeline is None:
+        _pipeline = VoicePipeline()
+    return _pipeline
+```
+
+---
+
+## File 6: `voice_agent/voice_server.py`
+
+```python
+"""
+Voice agent WebSocket server and HTTP endpoints.
+Provides:
+  1. WebSocket endpoint for real-time voice streaming
+  2. HTTP endpoint for upload-based voice processing
+  3. Browser-based voice interface
+
+Usage:
+    python voice_agent/voice_server.py
+"""
+import os
+import io
+import json
+import time
+import wave
+import asyncio
+import base64
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, Response
+from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from voice_agent.config import VOICE_CONFIG
+from voice_agent.voice_pipeline import get_voice_pipeline
+from voice_agent.stt_engine import transcribe_wav_bytes
+from voice_agent.tts_engine import synthesize_speech
+
+app = FastAPI(
+    title="Voice Agent API",
+    description="Multi-tenant voice agent: STT → LLM → TTS",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# Browser Voice Interface
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def voice_ui():
+    """Serve the browser-based voice interface."""
+    return VOICE_HTML
+
+
+# ============================================================
+# HTTP Voice Endpoint
+# ============================================================
+
+@app.post("/voice/process")
+async def process_voice(
+    audio: UploadFile = File(..., description="WAV audio file"),
+    tenant_id: str = Form(default="sis"),
+    session_id: str = Form(default=""),
+):
+    """
+    Process an uploaded audio file through the full voice pipeline.
+    Returns JSON with transcription, response text, and base64 audio.
+    """
+    pipeline = get_voice_pipeline()
+
+    # Get or create session
+    session = None
+    if session_id:
+        session = pipeline.get_session(session_id)
+    if not session:
+        session = pipeline.create_session(tenant_id)
+
+    # Read and convert audio
+    audio_bytes = await audio.read()
+
+    try:
+        # Parse WAV
+        with io.BytesIO(audio_bytes) as wav_io:
+            with wave.open(wav_io, 'rb') as wf:
+                sample_rate = wf.getframerate()
+                n_channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                frames = wf.readframes(wf.getnframes())
+
+        # Convert to float32 mono
+        if sample_width == 2:
+            audio_np = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        else:
+            audio_np = np.frombuffer(frames, dtype=np.float32)
+
+        if n_channels > 1:
+            audio_np = audio_np.reshape(-1, n_channels).mean(axis=1)
+
+    except Exception as e:
+        return {"status": "error", "message": f"Invalid audio format: {e}"}
+
+    # Process through pipeline
+    result = await pipeline.process_audio(audio_np, session, sample_rate)
+
+    # Encode response audio as base64 for JSON transport
+    response_data = {
+        "status": result["status"],
+        "session_id": session.session_id,
+        "user_text": result.get("user_text", ""),
+        "assistant_text": result.get("assistant_text", ""),
+        "timing": result.get("timing", {}),
+        "model_type": result.get("model_type", ""),
+    }
+
+    if result.get("audio_bytes"):
+        response_data["audio_base64"] = base64.b64encode(
+            result["audio_bytes"]
+        ).decode("ascii")
+        response_data["audio_format"] = "mp3"
+
+    return response_data
+
+
+# ============================================================
+# WebSocket Voice Endpoint
+# ============================================================
+
+@app.websocket("/voice/ws")
+async def voice_websocket(
+    websocket: WebSocket,
+    tenant_id: str = Query(default="sis"),
+):
+    """
+    WebSocket endpoint for real-time voice interaction.
+
+    Protocol:
+    Client → Server:
+      - {"type": "audio", "data": "<base64 WAV>"} — Send audio chunk
+      - {"type": "end_turn"} — Signal end of speech
+      - {"type": "set_tenant", "tenant_id": "sis"|"mfg"} — Change tenant
+
+    Server → Client:
+      - {"type": "stt_result", "text": "..."} — Transcription
+      - {"type": "llm_text", "text": "..."} — LLM response text
+      - {"type": "audio_chunk", "data": "<base64 MP3>"} — TTS audio chunk
+      - {"type": "turn_complete", "timing": {...}} — Turn complete
+      - {"type": "error", "message": "..."} — Error
+    """
+    await websocket.accept()
+    logger.info(f"Voice WebSocket connected (tenant: {tenant_id})")
+
+    pipeline = get_voice_pipeline()
+    session = pipeline.create_session(tenant_id)
+    audio_buffer = bytearray()
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            msg_type = message.get("type", "")
+
+            if msg_type == "set_tenant":
+                new_tenant = message.get("tenant_id", tenant_id)
+                session = pipeline.create_session(new_tenant)
+                tenant_id = new_tenant
+                await websocket.send_json({
+                    "type": "tenant_changed",
+                    "tenant_id": tenant_id,
+                    "session_id": session.session_id,
+                })
+
+            elif msg_type == "audio":
+                # Append audio data
+                audio_b64 = message.get("data", "")
+                if audio_b64:
+                    audio_buffer.extend(base64.b64decode(audio_b64))
+
+            elif msg_type == "end_turn":
+                if len(audio_buffer) < 1000:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Audio too short",
+                    })
+                    audio_buffer.clear()
+                    continue
+
+                # Process the buffered audio
+                try:
+                    # Parse WAV from buffer
+                    with io.BytesIO(bytes(audio_buffer)) as wav_io:
+                        with wave.open(wav_io, 'rb') as wf:
+                            sr = wf.getframerate()
+                            nc = wf.getnchannels()
+                            sw = wf.getsampwidth()
+                            frames = wf.readframes(wf.getnframes())
+
+                    if sw == 2:
+                        audio_np = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                    else:
+                        audio_np = np.frombuffer(frames, dtype=np.float32)
+                    if nc > 1:
+                        audio_np = audio_np.reshape(-1, nc).mean(axis=1)
+
+                    # Stream results
+                    async for event in pipeline.process_audio_streaming(
+                        audio_np, session, sr
+                    ):
+                        evt_type = event.get("event", "")
+
+                        if evt_type == "stt_complete":
+                            await websocket.send_json({
+                                "type": "stt_result",
+                                "text": event.get("text", ""),
+                                "stt_time_s": event.get("stt_time_s", 0),
+                            })
+
+                        elif evt_type == "llm_complete":
+                            await websocket.send_json({
+                                "type": "llm_text",
+                                "text": event.get("text", ""),
+                                "llm_time_s": event.get("llm_time_s", 0),
+                            })
+
+                        elif evt_type == "audio_chunk":
+                            chunk_b64 = base64.b64encode(
+                                event["data"]
+                            ).decode("ascii")
+                            await websocket.send_json({
+                                "type": "audio_chunk",
+                                "data": chunk_b64,
+                            })
+
+                        elif evt_type == "complete":
+                            await websocket.send_json({
+                                "type": "turn_complete",
+                                "user_text": event.get("user_text", ""),
+                                "assistant_text": event.get("assistant_text", ""),
+                                "total_time_s": event.get("total_time_s", 0),
+                            })
+
+                        elif evt_type == "empty":
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "No speech detected",
+                            })
+
+                except Exception as e:
+                    logger.error(f"Voice processing error: {e}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e),
+                    })
+
+                audio_buffer.clear()
+
+    except WebSocketDisconnect:
+        logger.info(f"Voice WebSocket disconnected (session: {session.session_id})")
+    except Exception as e:
+        logger.error(f"Voice WebSocket error: {e}")
+
+
+# ============================================================
+# Session Info
+# ============================================================
+
+@app.get("/voice/session/{session_id}")
+async def get_session(session_id: str):
+    """Get voice session summary."""
+    pipeline = get_voice_pipeline()
+    summary = pipeline.get_session_summary(session_id)
+    if not summary:
+        return {"error": "Session not found"}
+    return summary
+
+
+# ============================================================
+# TTS Test
+# ============================================================
+
+@app.get("/voice/tts")
+async def test_tts(
+    text: str = Query(default="Hello, this is a test of the text to speech system."),
+    tenant_id: str = Query(default="sis"),
+):
+    """Test TTS endpoint — returns MP3 audio."""
+    audio_bytes = await synthesize_speech(text, tenant_id)
+    return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
+# ============================================================
+# Browser Voice Interface HTML
+# ============================================================
+
+VOICE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Agent — Multi-Tenant LLM</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; color: #333; }
+.container { max-width: 600px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; margin-bottom: 4px; font-size: 1.5em; }
+.subtitle { text-align: center; color: #888; font-size: 0.85em; margin-bottom: 20px; }
+
+.tenant-select { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; }
+.tenant-btn { padding: 10px 24px; border: 2px solid #ddd; border-radius: 12px; background: white;
+  cursor: pointer; font-size: 14px; transition: all 0.2s; }
+.tenant-btn.active-sis { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+.tenant-btn.active-mfg { border-color: #22c55e; background: #f0fdf4; color: #15803d; }
+
+.mic-area { text-align: center; margin: 30px 0; }
+.mic-btn { width: 80px; height: 80px; border-radius: 50%; border: none; cursor: pointer;
+  font-size: 28px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.mic-btn.idle { background: #3b82f6; color: white; }
+.mic-btn.recording { background: #ef4444; color: white; animation: pulse 1s infinite; }
+.mic-btn.processing { background: #f59e0b; color: white; cursor: wait; }
+.mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+.status { text-align: center; font-size: 13px; color: #888; min-height: 24px; margin: 10px 0; }
+
+.transcript-area { margin: 20px 0; }
+.turn { margin-bottom: 16px; padding: 12px; border-radius: 12px; }
+.turn-user { background: #e8f0fe; border-left: 3px solid #3b82f6; }
+.turn-assistant { background: white; border: 1px solid #e5e7eb; border-left: 3px solid #22c55e; }
+.turn-label { font-size: 11px; font-weight: 600; color: #888; margin-bottom: 4px; text-transform: uppercase; }
+.turn-text { font-size: 14px; line-height: 1.5; }
+.turn-meta { font-size: 11px; color: #aaa; margin-top: 6px; }
+
+.connection-bar { text-align: center; padding: 6px; font-size: 12px; border-radius: 8px; margin-bottom: 16px; }
+.connected { background: #dcfce7; color: #166534; }
+.disconnected { background: #fef2f2; color: #991b1b; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎤 Voice Agent</h1>
+  <p class="subtitle">Multi-Tenant LLM • Speak to ask a question</p>
+
+  <div id="connectionBar" class="connection-bar disconnected">Connecting...</div>
+
+  <div class="tenant-select">
+    <button class="tenant-btn active-sis" id="btnSis" onclick="setTenant('sis')">🏫 SIS</button>
+    <button class="tenant-btn" id="btnMfg" onclick="setTenant('mfg')">🏭 MFG</button>
+  </div>
+
+  <div class="mic-area">
+    <button class="mic-btn idle" id="micBtn" onclick="toggleRecording()">🎤</button>
+  </div>
+  <div class="status" id="status">Tap the microphone to start speaking</div>
+
+  <div class="transcript-area" id="transcripts"></div>
+</div>
+
+<script>
+let tenantId = 'sis';
+let isRecording = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let audioContext = null;
+
+const micBtn = document.getElementById('micBtn');
+const statusEl = document.getElementById('status');
+const transcriptsEl = document.getElementById('transcripts');
+const connBar = document.getElementById('connectionBar');
+
+// Check inference server
+async function checkConnection() {
+  try {
+    const resp = await fetch('/voice/tts?text=test&tenant_id=sis', { method: 'HEAD' });
+    connBar.className = 'connection-bar connected';
+    connBar.textContent = '● Connected to voice server';
+    return true;
+  } catch {
+    connBar.className = 'connection-bar disconnected';
+    connBar.textContent = '○ Voice server not reachable';
+    return false;
+  }
+}
+checkConnection();
+setInterval(checkConnection, 10000);
+
+function setTenant(t) {
+  tenantId = t;
+  document.getElementById('btnSis').className = 'tenant-btn' + (t === 'sis' ? ' active-sis' : '');
+  document.getElementById('btnMfg').className = 'tenant-btn' + (t === 'mfg' ? ' active-mfg' : '');
+  transcriptsEl.innerHTML = '';
+  statusEl.textContent = `Switched to ${t.toUpperCase()} tenant`;
+}
+
+async function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
+    });
+
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    audioChunks = [];
+
+    // Use MediaRecorder for WAV capture
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      await processAudio(blob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    micBtn.className = 'mic-btn recording';
+    micBtn.textContent = '⏹';
+    statusEl.textContent = 'Listening... Tap to stop';
+  } catch (err) {
+    statusEl.textContent = 'Microphone access denied: ' + err.message;
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  micBtn.className = 'mic-btn processing';
+  micBtn.textContent = '⏳';
+  micBtn.disabled = true;
+  statusEl.textContent = 'Processing...';
+}
+
+async function processAudio(webmBlob) {
+  try {
+    // Convert webm to WAV using AudioContext
+    const arrayBuffer = await webmBlob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const wavBlob = audioBufferToWav(audioBuffer);
+
+    // Send to server
+    const formData = new FormData();
+    formData.append('audio', wavBlob, 'recording.wav');
+    formData.append('tenant_id', tenantId);
+
+    statusEl.textContent = 'Transcribing speech...';
+
+    const response = await fetch('/voice/process', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (result.status === 'success') {
+      // Show transcript
+      addTurn('user', result.user_text, null);
+
+      statusEl.textContent = 'Generating response...';
+
+      addTurn('assistant', result.assistant_text, result.timing);
+
+      // Play audio
+      if (result.audio_base64) {
+        statusEl.textContent = 'Playing response...';
+        await playAudio(result.audio_base64);
+      }
+
+      statusEl.textContent = `Done (${result.timing.total_s}s total)`;
+    } else {
+      statusEl.textContent = result.message || 'No speech detected';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+
+  micBtn.className = 'mic-btn idle';
+  micBtn.textContent = '🎤';
+  micBtn.disabled = false;
+}
+
+function addTurn(role, text, timing) {
+  const div = document.createElement('div');
+  div.className = 'turn turn-' + role;
+
+  let meta = '';
+  if (timing) {
+    meta = `<div class="turn-meta">⏱ STT: ${timing.stt_s}s | LLM: ${timing.llm_s}s | TTS: ${timing.tts_s}s | Total: ${timing.total_s}s</div>`;
+  }
+
+  div.innerHTML = `
+    <div class="turn-label">${role === 'user' ? '🎤 You' : (tenantId === 'sis' ? '🏫' : '🏭') + ' Assistant'}</div>
+    <div class="turn-text">${text}</div>
+    ${meta}
+  `;
+  transcriptsEl.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function playAudio(base64Data) {
+  return new Promise((resolve) => {
+    const audio = new Audio('data:audio/mpeg;base64,' + base64Data);
+    audio.onended = resolve;
+    audio.onerror = resolve;
+    audio.play().catch(resolve);
+  });
+}
+
+// Convert AudioBuffer to WAV Blob
+function audioBufferToWav(buffer) {
+  const numChannels = 1;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitsPerSample = 16;
+
+  const data = buffer.getChannelData(0);
+  const dataLength = data.length * (bitsPerSample / 8);
+  const headerLength = 44;
+  const totalLength = headerLength + dataLength;
+
+  const arrayBuffer = new ArrayBuffer(totalLength);
+  const view = new DataView(arrayBuffer);
+
+  // WAV header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, totalLength - 8, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  // Audio data
+  let offset = 44;
+  for (let i = 0; i < data.length; i++) {
+    const sample = Math.max(-1, Math.min(1, data[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    offset += 2;
+  }
+
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+</script>
+</body>
+</html>"""
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = VOICE_CONFIG.voice_port
+    logger.info(f"Starting voice server on port {port}")
+    uvicorn.run(
+        "voice_agent.voice_server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        log_level="info",
+    )
+```
+
+---
+
+## How to run this series
+
+```bash
+# 1. Install voice dependencies
+pip install faster-whisper edge-tts soundfile numpy
+
+# If faster-whisper fails, install openai-whisper instead:
+# pip install openai-whisper
+
+# 2. Make sure inference server is running on port 8000
+uvicorn inference.main:app --host 0.0.0.0 --port 8000 &
+
+# 3. Start the voice server
+python voice_agent/voice_server.py
+
+# 4. Open browser at http://localhost:8001
+```
+
+### Testing individual components
+
+```bash
+# Test STT
+python voice_agent/stt_engine.py
+
+# Test TTS
+python voice_agent/tts_engine.py
+# → Creates test_sis_voice.mp3 and test_mfg_voice.mp3
+
+# Test TTS via API
+curl "http://localhost:8001/voice/tts?text=Hello%20world&tenant_id=sis" --output test.mp3
+
+# Test full pipeline via curl
+curl -X POST http://localhost:8001/voice/process \
+  -F "audio=@recording.wav" \
+  -F "tenant_id=sis"
+```
+
+### Expected voice interaction flow
+
+```
+┌─────────────────────────────────────┐
+│     🎤 Voice Agent                   │
+│     Multi-Tenant LLM                 │
+│                                      │
+│  ● Connected to voice server         │
+│                                      │
+│     [🏫 SIS]  [🏭 MFG]              │
+│                                      │
+│         ┌──────────┐                 │
+│         │    🎤    │  ← Tap to speak │
+│         └──────────┘                 │
+│     Tap the microphone to start      │
+│                                      │
+│  ┌─────────────────────────────────┐ │
+│  │ 🎤 YOU                          │ │
+│  │ What documents are needed       │ │
+│  │ for enrollment?                 │ │
+│  └─────────────────────────────────┘ │
+│                                      │
+│  ┌─────────────────────────────────┐ │
+│  │ 🏫 ASSISTANT                    │ │
+│  │ For enrollment in District 42,  │ │
+│  │ students must provide proof of  │ │
+│  │ residency, immunization records │ │
+│  │ and a birth certificate.        │ │
+│  │                                 │ │
+│  │ ⏱ STT: 0.8s | LLM: 2.1s |     │ │
+│  │   TTS: 1.5s | Total: 4.4s      │ │
+│  └─────────────────────────────────┘ │
+│                                      │
+│  Done (4.4s total)                   │
+└─────────────────────────────────────┘
+```
+
+### Latency breakdown (expected on your hardware)
+
+| Stage | Expected Time | Notes |
+|---|---|---|
+| STT (Whisper base, CPU) | 0.5–1.5s | For 2–5s audio input |
+| LLM inference | 1.5–4.0s | With RAG, 4-bit Qwen 1.5B |
+| TTS (edge-tts) | 0.8–2.0s | Network call to Microsoft TTS |
+| **Total roundtrip** | **3–7s** | Acceptable for voice demo |
+
+### Key architecture decisions
+
+| Decision | Rationale |
+|---|---|
+| **Whisper on CPU** | Saves GPU for LLM; `base` model is fast enough |
+| **edge-tts** | Free, no API key, high quality, fast |
+| **Tenant-specific voices** | Female voice for SIS, male voice for MFG |
+| **Browser-based recording** | No native app needed for demo |
+| **WAV format** | Universal, lossless, easy to process |
+| **HTTP upload + JSON response** | Simpler than full WebSocket for demo |
+| **WebSocket also available** | For streaming/real-time demo if needed |
+| **Shorter max_new_tokens (256)** | Voice responses should be concise |
+| **Session state** | Maintains conversation history across turns |
+| **Base64 audio in JSON** | Avoids binary protocol complexity |
+
+---
+
+**Next: Series 9 — Monitoring Dashboard & MLOps (`monitoring/`, `mlops/`)**
+
+Shall I continue with Series 9?
