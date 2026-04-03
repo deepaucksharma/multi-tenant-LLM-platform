@@ -25,6 +25,7 @@ from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
     get_gpu_memory_info,
+    get_training_runtime_config,
 )
 from training.data_loader import load_sft_dataset
 from training.mlflow_utils import ExperimentTracker, ModelRegistry
@@ -47,9 +48,10 @@ def train_sft(tenant_id: str, config_override: dict = None):
     if config_override:
         config.update(config_override)
 
-    train_cfg = config["training"]
-    model_cfg = config["model"]
-    tenant_cfg = config["tenant"]
+        train_cfg = config["training"]
+        model_cfg = config["model"]
+        tenant_cfg = config["tenant"]
+        runtime_cfg = get_training_runtime_config(config)
 
     # Initialize tracking
     tracker = ExperimentTracker(
@@ -83,6 +85,8 @@ def train_sft(tenant_id: str, config_override: dict = None):
         # Log config
         tracker.log_params({
             "base_model": model_cfg["base_model"],
+            "device": runtime_cfg["device"],
+            "use_bnb_4bit": runtime_cfg["use_bnb_4bit"],
             "max_seq_length": model_cfg["max_seq_length"],
             "lora_r": config["lora"]["r"],
             "lora_alpha": config["lora"]["lora_alpha"],
@@ -136,11 +140,11 @@ def train_sft(tenant_id: str, config_override: dict = None):
             save_strategy=train_cfg.get("save_strategy", "steps"),
             save_steps=train_cfg.get("save_steps", 50),
             save_total_limit=train_cfg.get("save_total_limit", 3),
-            fp16=train_cfg.get("fp16", True),
-            bf16=train_cfg.get("bf16", False),
+            fp16=runtime_cfg["fp16"],
+            bf16=runtime_cfg["bf16"],
             gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
             gradient_checkpointing_kwargs={"use_reentrant": False},
-            optim=train_cfg.get("optim", "paged_adamw_8bit"),
+            optim=runtime_cfg["optim"],
             max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
             seed=train_cfg.get("seed", 42),
             report_to="none",  # We handle tracking ourselves
@@ -149,6 +153,7 @@ def train_sft(tenant_id: str, config_override: dict = None):
             greater_is_better=False,
             remove_unused_columns=False,
             dataloader_pin_memory=False,  # Save memory
+            no_cuda=runtime_cfg["device"] == "cpu",
         )
 
         # ---- Create trainer ----

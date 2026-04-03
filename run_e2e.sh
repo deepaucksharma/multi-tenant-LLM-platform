@@ -99,6 +99,16 @@ log_info "Checking GPU availability..."
 GPU_INFO=$(python3 -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, Devices: {torch.cuda.device_count()}')" 2>/dev/null)
 log_info "$GPU_INFO"
 
+if [ "$SKIP_TRAIN" = false ]; then
+    log_info "Checking training environment..."
+    if python3 -m training.check_env > /tmp/train_env_check.json 2>/dev/null; then
+        log_success "Training environment is ready"
+    else
+        log_warning "Training environment is incomplete"
+        log_info "Run 'make check-train-env' for details"
+    fi
+fi
+
 log_info "Checking disk space..."
 DISK_SPACE=$(df -h . | awk 'NR==2 {print $4}')
 log_info "Available disk space: $DISK_SPACE"
@@ -151,15 +161,15 @@ else
 fi
 
 # ============================================================
-# PHASE 3: Model Training (Optional - GPU Required)
+# PHASE 3: Model Training (Optional)
 # ============================================================
 if [ "$SKIP_TRAIN" = false ]; then
-    log_section "PHASE 3: Model Training (QLoRA SFT)"
+    log_section "PHASE 3: Model Training (Adaptive LoRA)"
     
-    log_warning "Training requires GPU and takes significant time"
+    log_warning "Training can use GPU when available and falls back adaptively, but still takes significant time"
     log_info "Training SIS tenant adapter..."
-    
-    if python3 -c "import torch; exit(0 if torch.cuda.is_available() else 1)"; then
+
+    if python3 -m training.check_env >/dev/null 2>&1; then
         # Train SIS
         log_info "Training SIS SFT adapter..."
         python3 training/sft_train.py --tenant sis --epochs 1
@@ -180,8 +190,8 @@ if [ "$SKIP_TRAIN" = false ]; then
             log_error "MFG training failed"
         fi
     else
-        log_warning "No GPU detected - skipping training"
-        log_info "The system will use base model without adapters"
+        log_warning "Training dependencies are not fully installed - skipping training"
+        log_info "The system will use base model or Ollama-backed inference without local adapters"
     fi
 else
     log_warning "Skipping training (--skip-train)"
@@ -193,7 +203,7 @@ fi
 log_section "PHASE 4: Running Tests"
 
 log_info "Running pytest suite..."
-pytest tests/ -v --tb=short
+python3 -m pytest tests/ -v --tb=short
 
 if [ $? -eq 0 ]; then
     log_success "All tests passed (19/19)"

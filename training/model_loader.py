@@ -1,7 +1,9 @@
 """
 Model and tokenizer loading utilities.
-Handles 4-bit quantization, LoRA setup, and adapter management.
-All sized for 8GB VRAM.
+
+Supports:
+- 4-bit QLoRA when CUDA + bitsandbytes are available
+- standard LoRA in fp16/fp32 when they are not
 """
 import os
 import torch
@@ -12,6 +14,90 @@ from loguru import logger
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def resolve_device() -> str:
+    """
+    Resolve the training/inference device from env and torch runtime.
+
+    DEVICE=auto|cuda|cpu is supported. ROCm builds still use "cuda" through torch.
+    """
+    requested = os.getenv("DEVICE", "auto").strip().lower()
+    if requested == "cpu":
+        return "cpu"
+    if requested == "cuda":
+        if torch.cuda.is_available():
+            return "cuda"
+        logger.warning("DEVICE=cuda requested but no CUDA/ROCm device is available; falling back to CPU")
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def is_rocm_build() -> bool:
+    """Return True when torch is a ROCm build."""
+    return getattr(torch.version, "hip", None) is not None
+
+
+def can_use_bnb_4bit(config: Dict[str, Any]) -> bool:
+    """Determine whether bitsandbytes 4-bit loading is actually usable."""
+    quant_cfg = config.get("quantization", {})
+    requested = str(os.getenv("USE_4BIT", "auto")).strip().lower()
+    if requested == "false":
+        return False
+    if requested == "true":
+        quant_requested = True
+    else:
+        quant_requested = quant_cfg.get("load_in_4bit", True)
+
+    if not quant_requested:
+        return False
+    if resolve_device() != "cuda":
+        return False
+    if is_rocm_build():
+        return False
+    try:
+        import bitsandbytes  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def get_effective_torch_dtype(config: Dict[str, Any]):
+    """Choose a dtype compatible with the active runtime."""
+    dtype_str = config["model"].get("torch_dtype", "float16")
+    preferred = getattr(torch, dtype_str)
+    if resolve_device() == "cpu" and preferred == torch.float16:
+        return torch.float32
+    return preferred
+
+
+def get_effective_optimizer(config: Dict[str, Any], prefer_bnb: bool = False) -> str:
+    """
+    Map bitsandbytes-specific optimizers to torch-native ones when needed.
+    """
+    requested = config.get("training", {}).get("optim", "paged_adamw_8bit")
+    if prefer_bnb:
+        return requested
+
+    if requested.startswith("paged_adamw"):
+        return "adamw_torch"
+    return requested
+
+
+def get_training_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return runtime-specific training argument overrides."""
+    device = resolve_device()
+    use_bnb = can_use_bnb_4bit(config)
+    dtype = get_effective_torch_dtype(config)
+
+    return {
+        "device": device,
+        "use_bnb_4bit": use_bnb,
+        "torch_dtype": dtype,
+        "optim": get_effective_optimizer(config, prefer_bnb=use_bnb),
+        "fp16": device == "cuda" and dtype == torch.float16,
+        "bf16": False,
+    }
 
 
 def load_base_model_and_tokenizer(
@@ -28,10 +114,11 @@ def load_base_model_and_tokenizer(
     Returns:
         (model, tokenizer)
     """
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model_cfg = config["model"]
-    quant_cfg = config["quantization"]
+    quant_cfg = config.get("quantization", {})
+    runtime = get_training_runtime_config(config)
 
     model_path = model_cfg.get("local_path", model_cfg["base_model"])
     if not Path(model_path).exists():
@@ -39,26 +126,43 @@ def load_base_model_and_tokenizer(
         logger.info(f"Local model not found, using HF hub: {model_path}")
 
     logger.info(f"Loading model: {model_path}")
+    torch_dtype = runtime["torch_dtype"]
 
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=quant_cfg.get("load_in_4bit", True),
-        bnb_4bit_compute_dtype=getattr(torch, quant_cfg.get("bnb_4bit_compute_dtype", "float16")),
-        bnb_4bit_quant_type=quant_cfg.get("bnb_4bit_quant_type", "nf4"),
-        bnb_4bit_use_double_quant=quant_cfg.get("bnb_4bit_use_double_quant", True),
-    )
+    load_kwargs = {
+        "torch_dtype": torch_dtype,
+        "trust_remote_code": True,
+        "token": os.getenv("HF_TOKEN"),
+        "attn_implementation": "eager",
+    }
 
-    dtype_str = model_cfg.get("torch_dtype", "float16")
-    torch_dtype = getattr(torch, dtype_str)
+    if runtime["use_bnb_4bit"]:
+        from transformers import BitsAndBytesConfig
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=torch_dtype,
-        trust_remote_code=True,
-        token=os.getenv("HF_TOKEN"),
-        attn_implementation="eager",
-    )
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=quant_cfg.get("load_in_4bit", True),
+            bnb_4bit_compute_dtype=getattr(
+                torch,
+                quant_cfg.get("bnb_4bit_compute_dtype", "float16"),
+            ),
+            bnb_4bit_quant_type=quant_cfg.get("bnb_4bit_quant_type", "nf4"),
+            bnb_4bit_use_double_quant=quant_cfg.get("bnb_4bit_use_double_quant", True),
+        )
+        load_kwargs["quantization_config"] = bnb_config
+        load_kwargs["device_map"] = "auto"
+        logger.info("Using bitsandbytes 4-bit loading")
+    else:
+        device = runtime["device"]
+        if device == "cuda":
+            load_kwargs["device_map"] = {"": "cuda:0"}
+        else:
+            load_kwargs["device_map"] = {"": "cpu"}
+            load_kwargs["low_cpu_mem_usage"] = True
+        logger.info(
+            f"Using standard model loading on {device} "
+            f"(dtype={str(torch_dtype).replace('torch.', '')})"
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
@@ -105,10 +209,16 @@ def setup_lora(model, config: Dict[str, Any]):
 
     lora_cfg = config["lora"]
 
-    model = prepare_model_for_kbit_training(
-        model,
-        use_gradient_checkpointing=True,
-    )
+    if getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False):
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=True,
+        )
+    else:
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        if hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
 
     peft_config = LoraConfig(
         r=lora_cfg.get("r", 16),

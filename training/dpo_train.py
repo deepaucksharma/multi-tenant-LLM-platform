@@ -28,6 +28,7 @@ from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
     get_gpu_memory_info,
+    get_training_runtime_config,
 )
 from training.data_loader import load_dpo_dataset
 from training.mlflow_utils import ExperimentTracker, ModelRegistry
@@ -67,6 +68,7 @@ def train_dpo(
     train_cfg = config["training"]
     model_cfg = config["model"]
     dpo_cfg = config["dpo"]
+    runtime_cfg = get_training_runtime_config(config)
 
     # Output directory
     output_dir = f"./models/adapters/{tenant_id}/dpo"
@@ -130,6 +132,8 @@ def train_dpo(
         tracker.log_params({
             "dpo_beta": dpo_cfg.get("beta", 0.1),
             "dpo_loss_type": dpo_cfg.get("loss_type", "sigmoid"),
+            "device": runtime_cfg["device"],
+            "use_bnb_4bit": runtime_cfg["use_bnb_4bit"],
             "dpo_lora_r": dpo_lora_config["r"],
             "learning_rate": train_cfg["learning_rate"],
             "num_epochs": train_cfg["num_train_epochs"],
@@ -184,10 +188,10 @@ def train_dpo(
             eval_steps=train_cfg.get("eval_steps", 10),
             save_strategy=train_cfg.get("save_strategy", "epoch"),
             save_total_limit=train_cfg.get("save_total_limit", 2),
-            fp16=train_cfg.get("fp16", True),
-            bf16=train_cfg.get("bf16", False),
+            fp16=runtime_cfg["fp16"],
+            bf16=runtime_cfg["bf16"],
             gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
-            optim=train_cfg.get("optim", "paged_adamw_8bit"),
+            optim=runtime_cfg["optim"],
             max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
             seed=train_cfg.get("seed", 42),
             report_to="none",
@@ -196,6 +200,7 @@ def train_dpo(
             loss_type=dpo_cfg.get("loss_type", "sigmoid"),
             max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
             max_length=dpo_cfg.get("max_length", 512),
+            no_cuda=runtime_cfg["device"] == "cpu",
         )
 
         # ---- Create DPO Trainer ----

@@ -122,7 +122,7 @@ class AdapterManager:
         return key
 
     def load_adapter(self, adapter_key: str) -> bool:
-        """Load a specific adapter onto the base model."""
+        """Load a specific adapter onto the base model via hot-swap."""
         if not self._base_loaded:
             self.load_base_model()
 
@@ -132,7 +132,7 @@ class AdapterManager:
 
         with self._lock:
             if self._active_adapter == adapter_key:
-                return True  # Already active
+                return True  # Already active — no-op
 
             adapter_info = self._available_adapters[adapter_key]
             adapter_path = adapter_info["path"]
@@ -141,20 +141,18 @@ class AdapterManager:
                 from peft import PeftModel
 
                 if hasattr(self._model, 'peft_config'):
-                    try:
+                    # Model is already a PeftModel — use hot-swap API.
+                    # load_adapter registers the adapter weights under adapter_key;
+                    # set_adapter makes it the active one. This preserves all other
+                    # loaded adapters in memory without destroying the model object.
+                    if adapter_key not in self._model.peft_config:
                         self._model.load_adapter(adapter_path, adapter_name=adapter_key)
-                        self._model.set_adapter(adapter_key)
-                    except Exception:
-                        logger.info(f"Reloading model with adapter: {adapter_key}")
-                        base_model = self._model.get_base_model() if hasattr(self._model, 'get_base_model') else self._model
-                        self._model = PeftModel.from_pretrained(
-                            base_model, adapter_path,
-                            adapter_name=adapter_key,
-                            is_trainable=False,
-                        )
+                    self._model.set_adapter(adapter_key)
                 else:
+                    # First adapter load: wrap the base model with PEFT.
                     self._model = PeftModel.from_pretrained(
-                        self._model, adapter_path,
+                        self._model,
+                        adapter_path,
                         adapter_name=adapter_key,
                         is_trainable=False,
                     )
@@ -164,11 +162,16 @@ class AdapterManager:
                 adapter_info["loaded"] = True
                 self._load_count += 1
 
-                logger.info(f"Adapter loaded: {adapter_key}")
+                logger.info(f"Adapter hot-swapped: {adapter_key}")
                 return True
 
             except Exception as e:
-                logger.error(f"Failed to load adapter {adapter_key}: {e}")
+                # Log but do NOT overwrite self._model — that would destroy
+                # any already-loaded adapters and break concurrent requests.
+                logger.error(
+                    f"Failed to hot-swap adapter '{adapter_key}': {e}. "
+                    f"Active adapter remains: {self._active_adapter}"
+                )
                 return False
 
     def generate(

@@ -1,7 +1,7 @@
-.PHONY: setup mlflow data train dpo index serve eval web mobile voice monitor test clean all
+.PHONY: setup mlflow data train dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env eval web mobile voice monitor test clean all
 
-PYTHON := python
-PIP := pip
+PYTHON ?= python3
+PIP ?= pip3
 VENV := venv
 
 # ── Environment ────────────────────────────────────────────────────────────────
@@ -37,10 +37,22 @@ dpo:
 
 # ── Inference server ───────────────────────────────────────────────────────────
 serve:
-	uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
+	$(PYTHON) -m uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
 
 serve-prod:
-	uvicorn inference.app:app --host 0.0.0.0 --port 8000 --workers 1
+	$(PYTHON) -m uvicorn inference.app:app --host 0.0.0.0 --port 8000 --workers 1
+
+serve-ollama:
+	INFERENCE_BACKEND=ollama $(PYTHON) -m uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
+
+check-ollama:
+	$(PYTHON) -c "from inference.model_backend import OllamaBackend; b = OllamaBackend(); print({'available': b.is_available(), 'base_url': b.base_url, 'models': b.list_models() if b.is_available() else []})"
+
+register-ollama-models:
+	$(PYTHON) scripts/register_ollama_models.py --tenant all --model-type sft
+
+check-train-env:
+	$(PYTHON) -m training.check_env
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 eval:
@@ -66,14 +78,14 @@ voice:
 
 # ── Monitoring dashboard ───────────────────────────────────────────────────────
 monitor:
-	uvicorn monitoring.dashboard:app --host 0.0.0.0 --port 8502
+	$(PYTHON) -m uvicorn monitoring.dashboard:app --host 0.0.0.0 --port 8502
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 test:
-	pytest tests/
+	$(PYTHON) -m pytest tests/
 
 test-cov:
-	pytest tests/ --cov --cov-report=html
+	$(PYTHON) -m pytest tests/ --cov --cov-report=html
 
 # ── Full pipeline ──────────────────────────────────────────────────────────────
 all: data index train serve

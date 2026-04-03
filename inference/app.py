@@ -31,6 +31,7 @@ from inference.schemas import (
 )
 from inference.auth import get_auth_context, verify_tenant_access, AuthContext
 from inference.adapter_manager import get_adapter_manager
+from inference.model_backend import get_model_backend
 from inference.tenant_router import get_tenant_route, list_tenants, validate_tenant_isolation
 from inference.canary import get_canary_manager
 from inference.audit_logger import get_audit_logger
@@ -46,10 +47,10 @@ async def lifespan(app: FastAPI):
 
     preload = os.getenv("PRELOAD_MODEL", "false").lower() == "true"
     if preload:
-        logger.info("Pre-loading base model...")
-        manager = get_adapter_manager()
-        manager.load_base_model()
-        logger.info("Model pre-loaded")
+        logger.info("Pre-loading inference backend...")
+        backend = get_model_backend()
+        backend.warmup()
+        logger.info("Inference backend pre-loaded")
     else:
         logger.info("Model will be loaded on first request (set PRELOAD_MODEL=true to preload)")
 
@@ -82,20 +83,29 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check():
     """Health check endpoint."""
-    manager = get_adapter_manager()
-    stats = manager.get_stats()
+    backend = get_model_backend()
+    stats = backend.get_stats()
+    base_loaded = bool(stats.get("base_loaded"))
+    status = "healthy" if base_loaded or stats.get("backend") == "huggingface" else "degraded"
 
     return HealthResponse(
-        status="healthy",
-        gpu_available=stats.get("gpu_memory", {}).get("available", True),
+        status=status,
+        gpu_available=bool(stats.get("gpu_memory", {}).get("available", True)),
         gpu_memory_gb=stats.get("gpu_memory", {}).get("allocated_gb"),
-        models_loaded=["base"] if stats["base_loaded"] else [],
+        models_loaded=[stats.get("backend", "base")] if base_loaded else [],
         adapters_available={
-            k: [v["adapter_type"]]
-            for k, v in manager.available_adapters.items()
+            key: ["configured"]
+            for key in stats.get("available_adapters", [])
         },
         uptime_seconds=round(time.time() - _server_start_time, 1),
     )
+
+
+@app.get("/backend/status", tags=["System"])
+async def backend_status():
+    """Detailed backend status for local setup checks."""
+    backend = get_model_backend()
+    return backend.get_stats()
 
 
 @app.get("/tenants", tags=["System"])
@@ -159,12 +169,9 @@ async def chat(
         route = get_tenant_route(tenant_id, model_type)
 
         # Load adapter
-        manager = get_adapter_manager()
-        if not manager.is_loaded:
-            manager.load_base_model()
-
-        if route.adapter_key:
-            manager.load_adapter(route.adapter_key)
+        backend = get_model_backend()
+        backend.prepare_route(route)
+        model_version = backend.get_model_label(tenant_id, model_type, route)
 
         # Build messages
         messages = [{"role": "system", "content": route.system_prompt}]
@@ -189,11 +196,13 @@ async def chat(
                 )
 
                 def gen_fn(msgs):
-                    return manager.generate(
+                    return backend.generate(
                         msgs,
                         max_new_tokens=request.max_new_tokens,
                         temperature=request.temperature,
                         top_p=request.top_p,
+                        tenant_id=tenant_id,
+                        model_type=model_type,
                     )
 
                 rag_response = execute_rag_chain(rag_request, generate_fn=gen_fn)
@@ -208,19 +217,23 @@ async def chat(
             except Exception as e:
                 logger.warning(f"RAG failed, falling back to direct generation: {e}")
                 messages.append({"role": "user", "content": request.message})
-                answer = manager.generate(
+                answer = backend.generate(
                     messages,
                     max_new_tokens=request.max_new_tokens,
                     temperature=request.temperature,
                     top_p=request.top_p,
+                    tenant_id=tenant_id,
+                    model_type=model_type,
                 )
         else:
             messages.append({"role": "user", "content": request.message})
-            answer = manager.generate(
+            answer = backend.generate(
                 messages,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
+                tenant_id=tenant_id,
+                model_type=model_type,
             )
 
         total_time = round((time.time() - t_start) * 1000, 2)
@@ -249,7 +262,7 @@ async def chat(
             tenant_id=tenant_id,
             message=answer,
             citations=citations,
-            model_version=route.adapter_key or "base",
+            model_version=model_version,
             model_type=model_type,
             retrieval_method=retrieval_method,
             grounding_score=grounding_score,
@@ -299,22 +312,22 @@ async def chat_stream(
 
             route = get_tenant_route(tenant_id, model_type)
 
-            manager = get_adapter_manager()
-            if not manager.is_loaded:
-                manager.load_base_model()
-            if route.adapter_key:
-                manager.load_adapter(route.adapter_key)
+            backend = get_model_backend()
+            backend.prepare_route(route)
+            model_version = backend.get_model_label(tenant_id, model_type, route)
 
             messages = [{"role": "system", "content": route.system_prompt}]
             for msg in request.conversation_history:
                 messages.append({"role": msg.role, "content": msg.content})
 
             citations_data = []
+            retrieval_chunks = []
             retrieval_time_ms = 0
 
             if request.use_rag:
                 try:
                     from rag.retriever import retrieve, format_context_for_llm, format_citations
+                    from rag.grounding import verify_grounding
 
                     retrieval_result = retrieve(
                         query=request.message,
@@ -324,6 +337,7 @@ async def chat_stream(
                     retrieval_time_ms = retrieval_result.retrieval_time_ms
                     context = format_context_for_llm(retrieval_result)
                     citations_data = format_citations(retrieval_result)
+                    retrieval_chunks = [c.content for c in retrieval_result.chunks]
 
                     user_msg = (
                         f"Context from knowledge base:\n"
@@ -347,11 +361,13 @@ async def chat_stream(
                 }
 
             # Stream tokens
-            for token in manager.generate_stream(
+            for token in backend.generate_stream(
                 messages,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
+                tenant_id=tenant_id,
+                model_type=model_type,
             ):
                 full_response += token
                 yield {
@@ -360,6 +376,14 @@ async def chat_stream(
                 }
 
             total_time = round((time.time() - t_start) * 1000, 2)
+
+            grounding_score = None
+            if request.use_rag and retrieval_chunks and full_response:
+                try:
+                    report = verify_grounding(full_response, retrieval_chunks)
+                    grounding_score = report.grounding_score
+                except Exception as e:
+                    logger.warning(f"Grounding verification failed in stream: {e}")
 
             # Audit log
             audit = get_audit_logger()
@@ -372,6 +396,7 @@ async def chat_stream(
                 is_canary=is_canary,
                 use_rag=request.use_rag,
                 citations_count=len(citations_data),
+                grounding_score=grounding_score,
                 latency_ms=total_time,
                 retrieval_time_ms=retrieval_time_ms,
                 generation_time_ms=total_time - retrieval_time_ms,
@@ -384,6 +409,7 @@ async def chat_stream(
                     "request_id": request_id,
                     "total_tokens": len(full_response.split()),
                     "latency_ms": total_time,
+                    "model_version": model_version,
                     "model_type": model_type,
                     "is_canary": is_canary,
                 }),
@@ -451,8 +477,8 @@ async def get_recent(
 @app.get("/model/stats", tags=["Monitoring"])
 async def get_model_stats():
     """Get model/adapter statistics."""
-    manager = get_adapter_manager()
-    return manager.get_stats()
+    backend = get_model_backend()
+    return backend.get_stats()
 
 
 # ============================================================

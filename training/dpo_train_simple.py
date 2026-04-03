@@ -24,6 +24,7 @@ from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
     get_gpu_memory_info,
+    get_training_runtime_config,
 )
 from training.data_loader import load_dpo_dataset
 from training.mlflow_utils import ExperimentTracker, ModelRegistry
@@ -48,6 +49,7 @@ def train_dpo_simple(tenant_id: str):
     train_cfg = config["training"]
     model_cfg = config["model"]
     dpo_cfg = config["dpo"]
+    runtime_cfg = get_training_runtime_config(config)
     output_dir = f"./models/adapters/{tenant_id}/dpo"
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -86,6 +88,8 @@ def train_dpo_simple(tenant_id: str):
 
         tracker.log_params({
             "dpo_beta": dpo_cfg.get("beta", 0.1),
+            "device": runtime_cfg["device"],
+            "use_bnb_4bit": runtime_cfg["use_bnb_4bit"],
             "dpo_lora_r": 8,
             "has_sft_base": has_sft,
             "learning_rate": train_cfg["learning_rate"],
@@ -116,9 +120,9 @@ def train_dpo_simple(tenant_id: str):
             eval_strategy="epoch",
             save_strategy="epoch",
             save_total_limit=2,
-            fp16=True,
+            fp16=runtime_cfg["fp16"],
             gradient_checkpointing=True,
-            optim="paged_adamw_8bit",
+            optim=runtime_cfg["optim"],
             seed=42,
             report_to="none",
             remove_unused_columns=False,
@@ -126,6 +130,7 @@ def train_dpo_simple(tenant_id: str):
             loss_type=dpo_cfg.get("loss_type", "sigmoid"),
             max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
             max_length=dpo_cfg.get("max_length", 512),
+            no_cuda=runtime_cfg["device"] == "cpu",
         )
 
         trainer = DPOTrainer(

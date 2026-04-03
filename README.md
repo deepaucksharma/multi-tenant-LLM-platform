@@ -125,6 +125,75 @@ make web-install
 make web
 ```
 
+### Local AMD / WSL Inference With Ollama
+
+For AMD GPUs on Windows, the smoothest local path is to run Ollama on the Windows host and keep FastAPI/RAG in WSL.
+
+```bash
+# In Windows PowerShell or Command Prompt
+ollama pull qwen2.5:1.5b
+
+# In WSL
+cp .env.example .env
+
+# Use Ollama explicitly
+echo "INFERENCE_BACKEND=ollama" >> .env
+
+# Optional tenant-specific models
+echo "OLLAMA_MODEL_SIS=qwen2.5:1.5b" >> .env
+echo "OLLAMA_MODEL_MFG=qwen2.5:1.5b" >> .env
+
+# Verify Ollama is reachable from WSL
+make check-ollama
+
+# Optional: create tenant-specific local aliases with tenant prompts
+make register-ollama-models
+
+# Start the API
+make serve-ollama
+```
+
+Useful endpoints for this mode:
+
+- `GET /health` for a quick readiness check
+- `GET /backend/status` for resolved backend and Ollama model mapping
+
+If you want stable tenant aliases instead of routing both tenants to the same base model, set:
+
+```bash
+echo "OLLAMA_MODEL_SIS_SFT=tenant-sis-sft" >> .env
+echo "OLLAMA_MODEL_MFG_SFT=tenant-mfg-sft" >> .env
+echo "OLLAMA_SOURCE_MODEL=qwen2.5:1.5b" >> .env
+make register-ollama-models
+```
+
+### Local Training Fallbacks
+
+Training now adapts to the available runtime instead of assuming CUDA-only 4-bit QLoRA:
+
+- `DEVICE=auto` uses CUDA/ROCm when available, otherwise CPU
+- `USE_4BIT=auto` enables bitsandbytes only when it is actually supported
+- when 4-bit is unavailable, training falls back to standard LoRA with `adamw_torch`
+
+For local AMD or CPU development, these defaults are usually enough:
+
+```bash
+echo "DEVICE=auto" >> .env
+echo "USE_4BIT=auto" >> .env
+```
+
+If you explicitly want to disable bitsandbytes even on NVIDIA:
+
+```bash
+echo "USE_4BIT=false" >> .env
+```
+
+You can verify whether the local environment is actually ready for training with:
+
+```bash
+make check-train-env
+```
+
 ### Full Pipeline
 
 ```bash
