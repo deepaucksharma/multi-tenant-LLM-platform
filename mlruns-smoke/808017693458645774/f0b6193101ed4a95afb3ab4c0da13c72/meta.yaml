@@ -1,0 +1,14 @@
+artifact_uri: file:///home/deepak/src/ai-poc/mlruns-smoke/808017693458645774/f0b6193101ed4a95afb3ab4c0da13c72/artifacts
+end_time: 1775254812016
+entry_point_name: ''
+experiment_id: '808017693458645774'
+lifecycle_stage: active
+run_id: f0b6193101ed4a95afb3ab4c0da13c72
+run_name: sft_sis_20260403_222007
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775254808032
+status: 4
+tags: []
+user_id: deepak

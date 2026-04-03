@@ -45,10 +45,9 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     A[Synthetic documents] --> B[Ingest]
-    B --> C[PII redaction]
-    C --> D[Chunking]
-    D --> E[SFT dataset build]
-    D --> F[DPO dataset build]
+    B --> C[Chunking]
+    C --> D[SFT dataset build]
+    C --> E[DPO dataset build]
     D --> G[RAG index build]
     E --> H[data tenant sft]
     F --> I[data tenant dpo]

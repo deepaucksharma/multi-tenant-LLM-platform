@@ -10,7 +10,7 @@ Read this if you understand the platform shape and now want a module-level guide
 | --- | --- | --- | --- |
 | `inference/` | Central runtime API, auth, routing, canary, audit, backend abstraction | `inference/app.py` | Responses, feedback, stats, audit records |
 | `rag/` | Retrieval, hybrid ranking, prompt assembly, grounding | `rag/rag_chain.py` | Context chunks, citations, grounding metadata |
-| `tenant_data_pipeline/` | Document generation, ingest, redaction, chunking, dataset builds | `tenant_data_pipeline/run_pipeline.py` | Cleaned data and training datasets under `data/` |
+| `tenant_data_pipeline/` | Document generation, ingest, chunking, dataset builds | `tenant_data_pipeline/run_pipeline.py` | Processed data and training datasets under `data/` |
 | `training/` | Runtime-adaptive model loading, SFT, DPO, merge, environment checks | `training/train_all.py` | Tenant adapters and training metadata |
 | `evaluation/` | Golden sets, hallucination checks, red-team, compliance, benchmark, judge, human-eval forms | `evaluation/run_all_evals.py` | Consolidated reports under `evaluation/reports/` |
 | `monitoring/` | Metrics aggregation, alerts, dashboard UI | `monitoring/dashboard.py` | Dashboard views and alert state |

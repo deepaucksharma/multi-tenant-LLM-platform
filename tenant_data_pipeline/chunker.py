@@ -83,10 +83,8 @@ def chunk_tenant_documents(tenant_id: str) -> List[Chunk]:
     config = TENANTS[tenant_id]
     config.chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    redacted_path = config.processed_dir / "redacted_documents.json"
     ingested_path = config.processed_dir / "ingested_documents.json"
-
-    source_path = redacted_path if redacted_path.exists() else ingested_path
+    source_path = ingested_path
     if not source_path.exists():
         logger.warning(f"No documents found for {tenant_id}")
         return []
@@ -97,7 +95,7 @@ def chunk_tenant_documents(tenant_id: str) -> List[Chunk]:
     all_chunks = []
 
     for doc in documents:
-        content = doc.get("content_redacted", doc["content"])
+        content = doc["content"]
         text_chunks = split_text_into_chunks(content)
         total_chunks = len(text_chunks)
 

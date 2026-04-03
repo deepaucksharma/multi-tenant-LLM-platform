@@ -1,22 +1,21 @@
 {
   "tenant_id": "sis",
   "domain": "education",
-  "generated_at": "2026-04-02T21:31:13.095057",
+  "generated_at": "2026-04-03T22:30:03.951946",
   "scores": {
     "duplication": 1.0,
     "topic_coverage": 1.0,
     "topic_balance": 0.5,
-    "pii_clean": 0.1499999999999999,
     "completeness": 1.0,
     "chunk_quality": 1.0,
-    "overall": 0.78
+    "overall": 0.9
   },
   "details": {
     "document_count": 15,
-    "total_words": 4775,
-    "avg_doc_length": 318.3333333333333,
+    "total_words": 4770,
+    "avg_doc_length": 318.0,
     "chunk_count": 40,
-    "avg_chunk_length": 948.8,
+    "avg_chunk_length": 949.125,
     "duplicate_chunks": 0,
     "duplication_rate": 0.0,
     "expected_topics": [
@@ -56,22 +55,15 @@
       "transcripts": 5,
       "transfer": 3
     },
-    "pii_instances_detected": 17,
-    "pii_by_type": {
-      "EMAIL": 9,
-      "PHONE": 8
-    },
     "short_chunks": 0,
-    "bias_keyword_hits": 7,
+    "bias_keyword_hits": 6,
     "bias_keywords_found": [
-      "disability",
-      "every student",
+      "always",
       "never",
-      "always"
+      "disability",
+      "every student"
     ]
   },
-  "flags": [
-    "PII detected: 17 instances (redacted)"
-  ],
+  "flags": [],
   "overall_status": "APPROVED"
 }

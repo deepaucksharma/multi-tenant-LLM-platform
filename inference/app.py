@@ -645,13 +645,57 @@ async def test_rag(
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import argparse
 
-    port = int(os.getenv("INFERENCE_PORT", 8000))
-    uvicorn.run(
-        "inference.app:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False,
-        log_level="info",
-    )
+    parser = argparse.ArgumentParser(description="Multi-Tenant LLM Inference Server")
+    parser.add_argument("--smoke-test", action="store_true", help="Run smoke test validation")
+    parser.add_argument("--port", type=int, default=None, help="Server port")
+    args = parser.parse_args()
+
+    if args.smoke_test:
+        # Smoke test mode: validate that models can be loaded and basic inference works
+        from loguru import logger
+
+        logger.info("🔄 Running smoke test validation...")
+
+        try:
+            # Load smoke model directly for testing
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            smoke_path = "./models/base/smoke-gpt2"
+            if not os.path.exists(smoke_path):
+                logger.info("Creating smoke model...")
+                from training.model_loader import _ensure_local_smoke_model
+                config = {"model": {"max_seq_length": 64}}
+                smoke_path = _ensure_local_smoke_model(config)
+
+            logger.info(f"Loading smoke model from {smoke_path}")
+            model = AutoModelForCausalLM.from_pretrained(smoke_path)
+            tokenizer = AutoTokenizer.from_pretrained(smoke_path)
+
+            # Simple text generation test
+            text = "Hello world"
+            inputs = tokenizer(text, return_tensors="pt")
+
+            outputs = model.generate(**inputs, max_new_tokens=5, do_sample=False)
+            response = tokenizer.decode(outputs[0][len(inputs["input_ids"][0]):], skip_special_tokens=True)
+
+            logger.info(f"✅ Smoke inference test passed (response: '{response.strip()}')")
+            logger.info("🎉 Smoke test validation completed successfully!")
+
+        except Exception as e:
+            logger.error(f"❌ Smoke test failed: {e}")
+            exit(1)
+
+    else:
+        # Normal server mode
+        import uvicorn
+
+        port = args.port or int(os.getenv("INFERENCE_PORT", 8000))
+        uvicorn.run(
+            "inference.app:app",
+            host="0.0.0.0",
+            port=port,
+            reload=False,
+            log_level="info",
+        )

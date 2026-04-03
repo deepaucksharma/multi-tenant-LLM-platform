@@ -1,0 +1,61 @@
+{
+  "pipeline_run_id": "20260403_223003",
+  "started_at": "2026-04-03T22:30:03.934162",
+  "status": "success",
+  "stages": {
+    "1_synthetic_generation": {
+      "status": "success",
+      "documents": {
+        "sis": 15,
+        "mfg": 15
+      },
+      "duration_sec": 0.0
+    },
+    "2_ingestion": {
+      "status": "success",
+      "documents_per_tenant": {
+        "sis": 15,
+        "mfg": 15
+      },
+      "duration_sec": 0.0
+    },
+    "3_chunking": {
+      "status": "success",
+      "chunks_per_tenant": {
+        "sis": 40,
+        "mfg": 49
+      },
+      "duration_sec": 0.01
+    },
+    "4_quality_scoring": {
+      "status": "success",
+      "quality_status": {
+        "sis": "APPROVED",
+        "mfg": "APPROVED"
+      },
+      "overall_scores": {
+        "sis": 0.9,
+        "mfg": 0.89
+      },
+      "duration_sec": 0.0
+    },
+    "5_sft_dataset": {
+      "status": "success",
+      "examples_per_tenant": {
+        "sis": 88,
+        "mfg": 97
+      },
+      "duration_sec": 0.02
+    },
+    "6_dpo_dataset": {
+      "status": "success",
+      "pairs_per_tenant": {
+        "sis": 38,
+        "mfg": 42
+      },
+      "duration_sec": 0.02
+    }
+  },
+  "completed_at": "2026-04-03T22:30:03.998347",
+  "total_duration_sec": 0.06
+}

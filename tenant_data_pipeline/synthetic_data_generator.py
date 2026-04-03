@@ -282,7 +282,7 @@ Official transcripts are released only to:
 - Third parties with signed FERPA release form on file
 
 SPECIAL CIRCUMSTANCES
-Special education transcripts must be redacted to remove confidential disability information unless explicitly authorized.
+Special education transcripts require additional authorization review before release.
 Grade records for students who were victims of crimes must be handled per the FERPA safety disclosure protocol.
 
 CONTACT

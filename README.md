@@ -63,7 +63,6 @@ flowchart LR
 | Start monitoring | `make monitor` |
 | Start web UI | `make web` |
 | Run evaluation suite | `make eval` |
-| Submit the CI-style HF Jobs suite | `make hf-jobs-ci` |
 
 Training outputs are saved locally in this project by default, mainly under `models/`, `evaluation/reports/`, and `mlruns/`.
 
@@ -102,7 +101,6 @@ These remain useful reference material, but they are not the main onboarding pat
 
 - [AMD_GPU_SETUP.md](AMD_GPU_SETUP.md)
 - [DEPLOYMENT_COMPLETE.md](DEPLOYMENT_COMPLETE.md)
-- [docs/huggingface-jobs.md](docs/huggingface-jobs.md)
 - [CODE_REVIEW.md](CODE_REVIEW.md)
 
 ## Next Pages To Read

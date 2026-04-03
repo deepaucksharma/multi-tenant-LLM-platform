@@ -5,6 +5,8 @@ These avoid real model loading and validate the control flow around it.
 import asyncio
 from types import SimpleNamespace
 
+import numpy as np
+
 
 def test_get_gpu_memory_info_uses_total_memory(monkeypatch):
     from training import model_loader
@@ -106,3 +108,78 @@ def test_health_reports_ready_for_lazy_hf_backend(monkeypatch):
     response = asyncio.run(inference_app.health_check())
 
     assert response.status == "ready"
+
+
+def test_resolve_device_falls_back_to_cpu_when_directml_probe_crashes(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from training import model_loader
+
+    monkeypatch.setenv("DEVICE", "auto")
+    monkeypatch.setattr(model_loader.torch.cuda, "is_available", lambda: False)
+
+    fake_directml = SimpleNamespace(
+        is_available=lambda: (_ for _ in ()).throw(RuntimeError("dml boom"))
+    )
+    monkeypatch.setitem(sys.modules, "torch_directml", fake_directml)
+
+    assert model_loader.resolve_device() == "cpu"
+
+
+def test_embedding_fallback_returns_deterministic_vectors(monkeypatch):
+    from rag import embeddings
+
+    embeddings._embed_model = None
+
+    def fail_import(*args, **kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(
+        "sentence_transformers.SentenceTransformer",
+        fail_import,
+        raising=True,
+    )
+
+    first = embeddings.embed_query("enrollment process")
+    second = embeddings.embed_query("enrollment process")
+    batch = embeddings.embed_texts(["enrollment process", "safety check"])
+
+    assert len(first) == embeddings.get_embedding_dimension()
+    assert first == second
+    assert isinstance(batch, np.ndarray)
+    assert batch.shape[0] == 2
+
+
+def test_smoke_model_source_auto_creates_local_tiny_model(monkeypatch, tmp_path):
+    from training import model_loader
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SMOKE_TEST_LOCAL_MODEL_PATH", "")
+    monkeypatch.setenv("SMOKE_TEST_BASE_MODEL", "")
+
+    data_dir = tmp_path / "data" / "sis" / "sft"
+    data_dir.mkdir(parents=True)
+    sample = [
+        {
+            "messages": [
+                {"role": "user", "content": "What is enrollment?"},
+                {"role": "assistant", "content": "Enrollment requires documents."},
+            ]
+        }
+    ]
+    (data_dir / "train_chat.json").write_text(__import__("json").dumps(sample))
+    (data_dir / "eval_chat.json").write_text(__import__("json").dumps(sample))
+
+    config = {
+        "model": {"base_model": "remote/model", "local_path": "./missing", "max_seq_length": 128},
+        "data": {
+            "train_path": str(data_dir / "train_chat.json"),
+            "eval_path": str(data_dir / "eval_chat.json"),
+        },
+        "smoke_test": {"enabled": True},
+    }
+
+    path = model_loader._ensure_local_smoke_model(config)
+
+    assert (tmp_path / "models" / "base" / "smoke-gpt2" / "config.json").exists()
+    assert path.endswith("models/base/smoke-gpt2")

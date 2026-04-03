@@ -1,0 +1,33 @@
+{
+  "pipeline_run_id": "20260403_220439",
+  "started_at": "2026-04-03T22:04:39.059438",
+  "status": "failed",
+  "stages": {
+    "1_synthetic_generation": {
+      "status": "success",
+      "documents": {
+        "sis": 15,
+        "mfg": 15
+      },
+      "duration_sec": 0.0
+    },
+    "2_ingestion": {
+      "status": "success",
+      "documents_per_tenant": {
+        "sis": 15,
+        "mfg": 15
+      },
+      "duration_sec": 0.0
+    },
+    "3_pii_redaction": {
+      "status": "failed",
+      "error": "HTTPSConnectionPool(host='raw.githubusercontent.com', port=443): Max retries exceeded with url: /explosion/spacy-models/master/compatibility.json (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x77c7ba541d20>: Failed to establish a new connection: [Errno -2] Name or service not known'))",
+      "exception_type": "ConnectionError",
+      "traceback": "Traceback (most recent call last):\n  File \"/usr/lib/python3/dist-packages/urllib3/connection.py\", line 169, in _new_conn\n    conn = connection.create_connection(\n  File \"/usr/lib/python3/dist-packages/urllib3/util/connection.py\", line 73, in create_connection\n    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):\n  File \"/usr/lib/python3.10/socket.py\", line 955, in getaddrinfo\n    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):\nsocket.gaierror: [Errno -2] Name or service not known\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/usr/lib/python3/dist-packages/urllib3/connectionpool.py\", line 700, in urlopen\n    httplib_response = self._make_request(\n  File \"/usr/lib/python3/dist-packages/urllib3/connectionpool.py\", line 383, in _make_request\n    self._validate_conn(conn)\n  File \"/usr/lib/python3/dist-packages/urllib3/connectionpool.py\", line 1017, in _validate_conn\n    conn.connect()\n  File \"/usr/lib/python3/dist-packages/urllib3/connection.py\", line 353, in connect\n    conn = self._new_conn()\n  File \"/usr/lib/python3/dist-packages/urllib3/connection.py\", line 181, in _new_conn\n    raise NewConnectionError(\nurllib3.exceptions.NewConnectionError: <urllib3.connection.HTTPSConnection object at 0x77c7ba541d20>: Failed to establish a new connection: [Errno -2] Name or service not known\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/adapters.py\", line 667, in send\n    resp = conn.urlopen(\n  File \"/usr/lib/python3/dist-packages/urllib3/connectionpool.py\", line 756, in urlopen\n    retries = retries.increment(\n  File \"/usr/lib/python3/dist-packages/urllib3/util/retry.py\", line 576, in increment\n    raise MaxRetryError(_pool, url, error or ResponseError(cause))\nurllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='raw.githubusercontent.com', port=443): Max retries exceeded with url: /explosion/spacy-models/master/compatibility.json (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x77c7ba541d20>: Failed to establish a new connection: [Errno -2] Name or service not known'))\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/deepak/src/ai-poc/tenant_data_pipeline/run_pipeline.py\", line 36, in _run_stage\n    stage_result = fn()\n  File \"/home/deepak/src/ai-poc/tenant_data_pipeline/pii_redact.py\", line 251, in process_all_tenants_pii\n    results[tenant_id] = process_tenant_pii(tenant_id)\n  File \"/home/deepak/src/ai-poc/tenant_data_pipeline/pii_redact.py\", line 188, in process_tenant_pii\n    presidio_findings = detect_pii_presidio(text, doc_id, tenant_id)\n  File \"/home/deepak/src/ai-poc/tenant_data_pipeline/pii_redact.py\", line 100, in detect_pii_presidio\n    _PRESIDIO_ANALYZER = AnalyzerEngine()\n  File \"/home/deepak/.local/lib/python3.10/site-packages/presidio_analyzer/analyzer_engine.py\", line 66, in __init__\n    nlp_engine = provider.create_engine()\n  File \"/home/deepak/.local/lib/python3.10/site-packages/presidio_analyzer/nlp_engine/nlp_engine_provider.py\", line 109, in create_engine\n    engine.load()\n  File \"/home/deepak/.local/lib/python3.10/site-packages/presidio_analyzer/nlp_engine/spacy_nlp_engine.py\", line 74, in load\n    self._download_spacy_model_if_needed(model[\"model_name\"])\n  File \"/home/deepak/.local/lib/python3.10/site-packages/presidio_analyzer/nlp_engine/spacy_nlp_engine.py\", line 81, in _download_spacy_model_if_needed\n    spacy.cli.download(model_name)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/spacy/cli/download.py\", line 96, in download\n    compatibility = get_compatibility()\n  File \"/home/deepak/.local/lib/python3.10/site-packages/spacy/cli/download.py\", line 141, in get_compatibility\n    r = requests.get(about.__compatibility__)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/api.py\", line 73, in get\n    return request(\"get\", url, params=params, **kwargs)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/api.py\", line 59, in request\n    return session.request(method=method, url=url, **kwargs)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/sessions.py\", line 589, in request\n    resp = self.send(prep, **send_kwargs)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/sessions.py\", line 703, in send\n    r = adapter.send(request, **kwargs)\n  File \"/home/deepak/.local/lib/python3.10/site-packages/requests/adapters.py\", line 700, in send\n    raise ConnectionError(e, request=request)\nrequests.exceptions.ConnectionError: HTTPSConnectionPool(host='raw.githubusercontent.com', port=443): Max retries exceeded with url: /explosion/spacy-models/master/compatibility.json (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x77c7ba541d20>: Failed to establish a new connection: [Errno -2] Name or service not known'))\n",
+      "duration_sec": 0.01
+    }
+  },
+  "failed_stage": "3_pii_redaction",
+  "completed_at": "2026-04-03T22:04:39.083191",
+  "total_duration_sec": 0.02
+}

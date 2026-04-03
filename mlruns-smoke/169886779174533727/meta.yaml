@@ -1,0 +1,7 @@
+artifact_location: file:///home/deepak/src/ai-poc/mlruns-smoke/169886779174533727
+creation_time: 1775255724912
+experiment_id: '169886779174533727'
+last_update_time: 1775255724912
+lifecycle_stage: active
+name: dpo-simple-sis
+workspace: default

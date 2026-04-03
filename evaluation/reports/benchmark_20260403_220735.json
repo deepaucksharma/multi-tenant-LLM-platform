@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-04-03T22:06:27.383936",
+  "system_info": {
+    "cpu_count": 20,
+    "memory_total_gb": 23.5,
+    "memory_available_gb": 19.4
+  },
+  "benchmarks": {
+    "embedding": {
+      "name": "embed_query",
+      "total_requests": 50,
+      "successful": 0,
+      "failed": 50,
+      "latency_p50_ms": 1044.02,
+      "latency_p95_ms": 1056.34,
+      "latency_p99_ms": 3389.81,
+      "latency_mean_ms": 1136.37,
+      "latency_min_ms": 1039.47,
+      "latency_max_ms": 3389.81,
+      "throughput_rps": 0.0,
+      "total_time_sec": 56.82,
+      "memory_mb": 664.7,
+      "cpu_percent": 16.2
+    },
+    "retrieval": {
+      "name": "retrieve",
+      "total_requests": 30,
+      "successful": 30,
+      "failed": 0,
+      "latency_p50_ms": 242.25,
+      "latency_p95_ms": 286.65,
+      "latency_p99_ms": 302.11,
+      "latency_mean_ms": 246.62,
+      "latency_min_ms": 209.98,
+      "latency_max_ms": 302.11,
+      "throughput_rps": 4.05,
+      "total_time_sec": 7.4,
+      "memory_mb": 868.8,
+      "cpu_percent": 21.5
+    },
+    "bm25_search": {
+      "name": "search_bm25",
+      "total_requests": 100,
+      "successful": 100,
+      "failed": 0,
+      "latency_p50_ms": 0.11,
+      "latency_p95_ms": 0.15,
+      "latency_p99_ms": 0.17,
+      "latency_mean_ms": 0.11,
+      "latency_min_ms": 0.08,
+      "latency_max_ms": 0.17,
+      "throughput_rps": 9004.52,
+      "total_time_sec": 0.01,
+      "memory_mb": 868.8,
+      "cpu_percent": 31.2
+    }
+  }
+}

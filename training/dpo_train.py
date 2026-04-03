@@ -160,6 +160,20 @@ def train_dpo(
         })
         logger.info(f"DPO dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
 
+        smoke_cfg = config.get("smoke_test", {})
+        if smoke_cfg.get("enabled", False):
+            train_limit = max(1, smoke_cfg.get("train_samples", 8))
+            eval_limit = max(1, smoke_cfg.get("eval_samples", 4))
+            train_dataset = train_dataset.select(range(min(len(train_dataset), train_limit)))
+            eval_dataset = eval_dataset.select(range(min(len(eval_dataset), eval_limit)))
+            smoke_seq_len = int(os.getenv("SMOKE_SEQ_LEN", "64"))
+            dpo_cfg["max_prompt_length"] = min(dpo_cfg.get("max_prompt_length", 256), smoke_seq_len // 2)
+            dpo_cfg["max_length"] = min(dpo_cfg.get("max_length", 512), smoke_seq_len)
+            logger.info(
+                f"Smoke test mode enabled: train={len(train_dataset)} eval={len(eval_dataset)}, "
+                f"max_prompt_length={dpo_cfg['max_prompt_length']}, max_length={dpo_cfg['max_length']}"
+            )
+
         # ---- Load reference model ----
         # DPO requires a frozen reference model alongside the policy model.
         # This doubles peak GPU/CPU memory usage.  Warn early if headroom is low.

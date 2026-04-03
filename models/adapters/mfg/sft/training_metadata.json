@@ -1,0 +1,63 @@
+{
+  "tenant_id": "mfg",
+  "model_type": "sft",
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "adapter_path": "./models/adapters/mfg/sft",
+  "train_metrics": {
+    "train_runtime": 0.0956,
+    "train_samples_per_second": 10.463,
+    "train_steps_per_second": 10.463,
+    "total_flos": 7176000.0,
+    "train_loss": 7.257101535797119,
+    "train_time_sec": 0.43
+  },
+  "eval_metrics": {
+    "eval_loss": 0,
+    "eval_runtime": 0
+  },
+  "config": {
+    "lora": {
+      "r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "bias": "none",
+      "task_type": "CAUSAL_LM"
+    },
+    "training": {
+      "output_dir": "./models/adapters/mfg/sft",
+      "num_train_epochs": 1,
+      "per_device_train_batch_size": 1,
+      "per_device_eval_batch_size": 1,
+      "gradient_accumulation_steps": 1,
+      "learning_rate": 0.0002,
+      "weight_decay": 0.01,
+      "warmup_ratio": 0.1,
+      "lr_scheduler_type": "cosine",
+      "logging_steps": 1,
+      "eval_strategy": "no",
+      "eval_steps": 1,
+      "save_strategy": "steps",
+      "save_steps": 1,
+      "save_total_limit": 1,
+      "fp16": true,
+      "bf16": false,
+      "gradient_checkpointing": false,
+      "optim": "adamw_torch",
+      "max_grad_norm": 1.0,
+      "seed": 42,
+      "report_to": "mlflow",
+      "max_steps": 1
+    }
+  },
+  "trained_at": "2026-04-03T22:35:16.167475",
+  "train_time_sec": 0.43
+}

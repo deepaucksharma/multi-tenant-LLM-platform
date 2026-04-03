@@ -103,6 +103,14 @@ def train_sft(tenant_id: str, config_override: dict = None):
         # ---- Load dataset ----
         logger.info("Loading SFT dataset...")
         data_cfg = config["data"]
+
+        smoke_cfg = config.get("smoke_test", {})
+        if smoke_cfg.get("enabled", False):
+            smoke_seq_len = int(os.getenv("SMOKE_SEQ_LEN", "64"))
+            model_cfg["max_seq_length"] = smoke_seq_len
+            tokenizer.model_max_length = smoke_seq_len
+            logger.info(f"Smoke mode: reducing max_seq_length to {smoke_seq_len}")
+
         train_dataset, eval_dataset = load_sft_dataset(
             train_path=data_cfg["train_path"],
             eval_path=data_cfg["eval_path"],
@@ -116,14 +124,13 @@ def train_sft(tenant_id: str, config_override: dict = None):
         })
         logger.info(f"Dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
 
-        smoke_cfg = config.get("smoke_test", {})
         if smoke_cfg.get("enabled", False):
             train_limit = max(1, smoke_cfg.get("train_samples", 8))
             eval_limit = max(1, smoke_cfg.get("eval_samples", 4))
             train_dataset = train_dataset.select(range(min(len(train_dataset), train_limit)))
             eval_dataset = eval_dataset.select(range(min(len(eval_dataset), eval_limit)))
             logger.info(
-                f"Smoke test mode enabled: train={len(train_dataset)} eval={len(eval_dataset)}"
+                f"Smoke test mode: train={len(train_dataset)} eval={len(eval_dataset)}"
             )
 
         # ---- Configure trainer ----
@@ -144,6 +151,9 @@ def train_sft(tenant_id: str, config_override: dict = None):
         # avoid a trainer crash when no checkpoint has been saved yet.
         smoke_mode = config.get("smoke_test", {}).get("enabled", False)
 
+        if smoke_mode:
+            os.environ["MLFLOW_TRACKING_URI"] = "file:./mlruns-smoke"
+
         training_args = TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=train_cfg["num_train_epochs"],
@@ -163,17 +173,17 @@ def train_sft(tenant_id: str, config_override: dict = None):
             save_total_limit=train_cfg.get("save_total_limit", 3),
             fp16=runtime_cfg["fp16"],
             bf16=runtime_cfg["bf16"],
-            gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
+            gradient_checkpointing=not smoke_mode and train_cfg.get("gradient_checkpointing", True),
             gradient_checkpointing_kwargs={"use_reentrant": False},
             optim=runtime_cfg["optim"],
             max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
             seed=train_cfg.get("seed", 42),
-            report_to="none",  # We handle tracking ourselves
-            load_best_model_at_end=not smoke_mode,  # Disabled in smoke: no checkpoint saved
+            report_to="none",
+            load_best_model_at_end=not smoke_mode,
             metric_for_best_model="eval_loss",
             greater_is_better=False,
             remove_unused_columns=False,
-            dataloader_pin_memory=False,  # Save memory
+            dataloader_pin_memory=False,
             use_cpu=runtime_cfg["device"] == "cpu",
         )
 
@@ -183,10 +193,7 @@ def train_sft(tenant_id: str, config_override: dict = None):
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            tokenizer=tokenizer,
-            max_seq_length=model_cfg["max_seq_length"],
-            dataset_text_field="text",
-            packing=False,
+            processing_class=tokenizer,
         )
 
         # ---- Train ----
@@ -211,13 +218,17 @@ def train_sft(tenant_id: str, config_override: dict = None):
         })
 
         # ---- Evaluate ----
-        logger.info("Running evaluation...")
-        eval_metrics = trainer.evaluate()
-        tracker.log_metrics({
-            "eval_loss": eval_metrics.get("eval_loss", 0),
-            "eval_runtime": eval_metrics.get("eval_runtime", 0),
-        })
-        logger.info(f"Eval loss: {eval_metrics.get('eval_loss', 'N/A')}")
+        if config.get("smoke_test", {}).get("enabled", False):
+            logger.info("Skipping evaluation for smoke test")
+            eval_metrics = {"eval_loss": 0, "eval_runtime": 0}
+        else:
+            logger.info("Running evaluation...")
+            eval_metrics = trainer.evaluate()
+            tracker.log_metrics({
+                "eval_loss": eval_metrics.get("eval_loss", 0),
+                "eval_runtime": eval_metrics.get("eval_runtime", 0),
+            })
+            logger.info(f"Eval loss: {eval_metrics.get('eval_loss', 'N/A')}")
 
         # ---- Save adapter ----
         logger.info(f"Saving adapter to {output_dir}...")
@@ -354,6 +365,7 @@ def main():
         overrides.setdefault("training", {})["per_device_eval_batch_size"] = 1
         overrides.setdefault("training", {})["gradient_accumulation_steps"] = 1
         overrides.setdefault("training", {})["max_steps"] = max_steps
+        overrides.setdefault("training", {})["eval_strategy"] = "no"  # Disable evaluation for smoke test
         overrides["smoke_test"] = {
             "enabled": True,
             "train_samples": 8,

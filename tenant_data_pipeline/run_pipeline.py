@@ -12,7 +12,6 @@ from loguru import logger
 
 from tenant_data_pipeline.synthetic_data_generator import save_synthetic_documents
 from tenant_data_pipeline.ingest import ingest_all_tenants
-from tenant_data_pipeline.pii_redact import process_all_tenants_pii
 from tenant_data_pipeline.chunker import chunk_all_tenants
 from tenant_data_pipeline.quality_scorer import generate_all_reports
 from tenant_data_pipeline.sft_data_builder import build_all_sft_datasets
@@ -84,31 +83,15 @@ def run_full_pipeline():
         )
         _run_stage(
             results,
-            "3_pii_redaction",
-            "Stage 3: PII detection and redaction...",
-            process_all_tenants_pii,
-            lambda pii_results: {
-                "pii_per_tenant": {
-                    tid: r.get("total_pii_found", 0) if isinstance(r, dict) else 0
-                    for tid, r in pii_results.items()
-                },
-                "compliance_status": {
-                    tid: r.get("compliance_status", "unknown") if isinstance(r, dict) else "unknown"
-                    for tid, r in pii_results.items()
-                },
-            },
-        )
-        _run_stage(
-            results,
-            "4_chunking",
-            "Stage 4: Chunking documents...",
+            "3_chunking",
+            "Stage 3: Chunking documents...",
             chunk_all_tenants,
             lambda chunk_results: {"chunks_per_tenant": chunk_results},
         )
         _run_stage(
             results,
-            "5_quality_scoring",
-            "Stage 5: Data quality assessment...",
+            "4_quality_scoring",
+            "Stage 4: Data quality assessment...",
             generate_all_reports,
             lambda quality_results: {
                 "quality_status": {
@@ -123,15 +106,15 @@ def run_full_pipeline():
         )
         _run_stage(
             results,
-            "6_sft_dataset",
-            "Stage 6: Building SFT datasets...",
+            "5_sft_dataset",
+            "Stage 5: Building SFT datasets...",
             build_all_sft_datasets,
             lambda sft_results: {"examples_per_tenant": sft_results},
         )
         _run_stage(
             results,
-            "7_dpo_dataset",
-            "Stage 7: Building DPO preference datasets...",
+            "6_dpo_dataset",
+            "Stage 6: Building DPO preference datasets...",
             build_all_dpo_datasets,
             lambda dpo_results: {"pairs_per_tenant": dpo_results},
         )

@@ -1,0 +1,7 @@
+artifact_location: file:///home/deepak/src/ai-poc/mlruns-smoke/342417551073765332
+creation_time: 1775255711253
+experiment_id: '342417551073765332'
+last_update_time: 1775255711253
+lifecycle_stage: active
+name: sft-mfg
+workspace: default

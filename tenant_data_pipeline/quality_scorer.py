@@ -1,7 +1,7 @@
 """
 Data quality scoring framework.
 Produces a quality report per tenant covering:
-- Completeness, duplication, topic coverage, PII, bias indicators
+- Completeness, duplication, topic coverage, bias indicators
 """
 import json
 import hashlib
@@ -92,21 +92,6 @@ def compute_quality_report(tenant_id: str) -> Dict:
         report["scores"]["topic_balance"] = round(balance, 2)
     else:
         report["scores"]["topic_balance"] = 0.0
-
-    # --- PII status ---
-    pii_path = config.processed_dir / "pii_report.json"
-    if pii_path.exists():
-        with open(pii_path) as f:
-            pii_report = json.load(f)
-        pii_count = pii_report.get("total_pii_found", 0)
-        report["details"]["pii_instances_detected"] = pii_count
-        report["details"]["pii_by_type"] = pii_report.get("pii_by_type", {})
-        report["scores"]["pii_clean"] = 1.0 if pii_count == 0 else max(0.0, 1.0 - pii_count * 0.05)
-        if pii_count > 0:
-            report["flags"].append(f"PII detected: {pii_count} instances (redacted)")
-    else:
-        report["scores"]["pii_clean"] = 0.5
-        report["flags"].append("PII scan not run")
 
     # --- Completeness score ---
     doc_count = report["details"]["document_count"]

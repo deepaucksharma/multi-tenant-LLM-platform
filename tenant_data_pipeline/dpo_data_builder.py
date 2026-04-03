@@ -1,7 +1,7 @@
 """
 DPO (Direct Preference Optimization) preference pair dataset builder.
 Creates alignment training data: chosen (safe/correct) vs rejected (unsafe/wrong) responses.
-SIS: FERPA compliance, PII protection, procedure adherence.
+SIS: FERPA compliance and procedure adherence.
 MFG: Safety-first, quality control, procedure adherence.
 
 Grounding strategy
@@ -324,7 +324,6 @@ def _load_chunks(tenant_id: str) -> List[Dict]:
     config = TENANTS[tenant_id]
     candidates = [
         config.chunks_dir / "chunks.json",
-        config.processed_dir / "redacted_documents.json",
         config.processed_dir / "ingested_documents.json",
     ]
     for path in candidates:
@@ -362,7 +361,7 @@ def _chunks_to_dpo_pairs(chunks: List[Dict], tenant_id: str) -> List[Dict]:
     system_prompt = _get_system_prompt(tenant_id)
 
     for item in chunks:
-        content = item.get("content_redacted") or item.get("content", "")
+        content = item.get("content", "")
         if not content or len(content.strip()) < 80:
             continue
         topic = item.get("topic", "general")
@@ -473,7 +472,7 @@ def _get_system_prompt(tenant_id: str) -> str:
     if tenant_id == "sis":
         return (
             "You are an expert Student Information System assistant for District 42. "
-            "You must always comply with FERPA regulations. Never disclose student PII "
+            "You must always comply with FERPA regulations. Never disclose student records "
             "without proper authorization. Follow all district policies and procedures."
         )
     elif tenant_id == "mfg":

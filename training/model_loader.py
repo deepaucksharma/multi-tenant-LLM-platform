@@ -9,6 +9,7 @@ import os
 import torch
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
+import json
 
 from loguru import logger
 from dotenv import load_dotenv
@@ -67,6 +68,8 @@ def resolve_device() -> str:
                 return "dml"
         except ImportError:
             pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"DEVICE=dml requested but DirectML probe failed: {exc}; falling back to CPU")
         logger.warning("DEVICE=dml requested but torch-directml is not available; falling back to CPU")
         return "cpu"
     if requested == "cuda":
@@ -81,6 +84,8 @@ def resolve_device() -> str:
             return "dml"
     except ImportError:
         pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"DirectML probe failed during auto device detection: {exc}; ignoring DirectML")
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -185,6 +190,103 @@ def resolve_model_source(config: Dict[str, Any], smoke_test: bool = False) -> st
     return model_cfg["base_model"]
 
 
+def _ensure_local_smoke_model(config: Dict[str, Any]) -> str:
+    """
+    Build a tiny local GPT-2 style model + tokenizer for offline smoke tests.
+
+    This keeps the full training code path exercisable on constrained systems
+    without requiring a network download.
+    """
+    smoke_dir = Path("./models/base/smoke-gpt2")
+    config_path = smoke_dir / "config.json"
+    if config_path.exists():
+        return str(smoke_dir)
+
+    logger.info(f"Creating local smoke-test model at {smoke_dir}")
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from tokenizers.trainers import WordLevelTrainer
+    from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
+
+    data_paths = [
+        Path(config["data"]["train_path"]),
+        Path(config["data"]["eval_path"]),
+    ]
+    corpus: list[str] = []
+    for path in data_paths:
+        if not path.exists():
+            continue
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8"))
+            for row in rows[:64]:
+                for msg in row.get("messages", []):
+                    content = msg.get("content", "").strip()
+                    if content:
+                        corpus.append(content)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not read smoke corpus from {path}: {exc}")
+
+    if not corpus:
+        corpus = [
+            "Students must provide proof of residency and a birth certificate.",
+            "Operators must follow lockout tagout before maintenance.",
+            "Attendance must be recorded within fifteen minutes of class start.",
+            "Stop production and notify quality if a class one defect is found.",
+        ]
+
+    chat_special_tokens = ["<|system|>", "<|user|>", "<|assistant|>"]
+    tokenizer_backend = Tokenizer(WordLevel(unk_token="[UNK]"))
+    tokenizer_backend.pre_tokenizer = Whitespace()
+    trainer = WordLevelTrainer(
+        special_tokens=["[PAD]", "[UNK]", "[BOS]", "[EOS]"] + chat_special_tokens,
+        min_frequency=1,
+    )
+    tokenizer_backend.train_from_iterator(corpus, trainer=trainer)
+
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer_backend,
+        bos_token="[BOS]",
+        eos_token="[EOS]",
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+    )
+    tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{% elif message['role'] == 'user' %}<|user|>\n{% elif message['role'] == 'assistant' %}<|assistant|>\n{% endif %}{{ message['content'] }}\n{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}"
+    smoke_seq_len = int(os.getenv("SMOKE_SEQ_LEN", "64"))
+    tokenizer.model_max_length = min(smoke_seq_len, int(config["model"].get("max_seq_length", 256)))
+    tokenizer.save_pretrained(smoke_dir)
+
+    smoke_seq_len = int(os.getenv("SMOKE_SEQ_LEN", "64"))
+    smoke_n_layer = int(os.getenv("SMOKE_N_LAYER", "1"))
+    smoke_n_embd = int(os.getenv("SMOKE_N_EMBD", "32"))
+    smoke_n_head = max(1, smoke_n_embd // 64)
+    smoke_n_positions = int(os.getenv("SMOKE_N_POSITIONS", "256"))
+
+    model_config = GPT2Config(
+        vocab_size=tokenizer.vocab_size,
+        n_positions=smoke_n_positions,
+        n_ctx=smoke_n_positions,
+        n_embd=smoke_n_embd,
+        n_layer=smoke_n_layer,
+        n_head=smoke_n_head,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    model = GPT2LMHeadModel(model_config)
+    model.save_pretrained(smoke_dir)
+    logger.info(
+        f"Smoke model: vocab={tokenizer.vocab_size}, "
+        f"n_layer={smoke_n_layer}, n_embd={smoke_n_embd}, "
+        f"n_head={smoke_n_head}, n_ctx={smoke_n_positions}, "
+        f"tokenizer_max_len={smoke_seq_len}, "
+        f"params={sum(p.numel() for p in model.parameters()):,}"
+    )
+    return str(smoke_dir)
+
+
 def load_base_model_and_tokenizer(
     config: Dict[str, Any],
     for_training: bool = True,
@@ -206,6 +308,8 @@ def load_base_model_and_tokenizer(
     runtime = get_training_runtime_config(config)
     smoke_test = config.get("smoke_test", {}).get("enabled", False)
     model_path = resolve_model_source(config, smoke_test=smoke_test)
+    if smoke_test and not Path(model_path).exists():
+        model_path = _ensure_local_smoke_model(config)
     if not Path(model_path).exists():
         logger.info(f"Local model not found, using model source: {model_path}")
 
@@ -326,11 +430,27 @@ def setup_lora(model, config: Dict[str, Any]):
         if hasattr(model, "gradient_checkpointing_enable"):
             model.gradient_checkpointing_enable()
 
+    target_modules = lora_cfg.get("target_modules", ["q_proj", "v_proj"])
+    available_module_names = {name.rsplit(".", 1)[-1] for name, _ in model.named_modules()}
+    if not any(module in available_module_names for module in target_modules):
+        fallback_targets = {
+            "gpt2": ["c_attn", "c_proj"],
+            "gpt_neo": ["q_proj", "v_proj"],
+            "llama": ["q_proj", "k_proj", "v_proj", "o_proj"],
+        }
+        model_type = getattr(getattr(model, "config", None), "model_type", "")
+        if model_type in fallback_targets:
+            logger.warning(
+                f"Configured LoRA target modules {target_modules} were not found for "
+                f"model_type={model_type}; using {fallback_targets[model_type]} instead."
+            )
+            target_modules = fallback_targets[model_type]
+
     peft_config = LoraConfig(
         r=lora_cfg.get("r", 16),
         lora_alpha=lora_cfg.get("lora_alpha", 32),
         lora_dropout=lora_cfg.get("lora_dropout", 0.05),
-        target_modules=lora_cfg.get("target_modules", ["q_proj", "v_proj"]),
+        target_modules=target_modules,
         bias=lora_cfg.get("bias", "none"),
         task_type=TaskType.CAUSAL_LM,
     )

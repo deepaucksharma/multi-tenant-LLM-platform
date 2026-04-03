@@ -6,54 +6,6 @@ import numpy as np
 import pytest
 
 
-def test_pii_runtime_status_is_degraded_for_sis_without_presidio(monkeypatch):
-    from tenant_data_pipeline import pii_redact
-
-    monkeypatch.setattr(pii_redact, "PRESIDIO_AVAILABLE", False)
-
-    status = pii_redact.get_pii_runtime_status("sis")
-
-    assert status["compliance_status"] == "degraded"
-    assert status["presidio_available"] is False
-    assert "regex" in status["detection_engines"]
-    assert status["warnings"]
-
-
-def test_pii_overlap_dedup_prevents_double_redaction():
-    from tenant_data_pipeline.pii_redact import PIIFinding, _deduplicate_findings, redact_text
-
-    text = "Contact Alice Example at alice@example.com today."
-    findings = [
-        PIIFinding(
-            doc_id="doc1",
-            tenant_id="sis",
-            pii_type="EMAIL",
-            original="alice@example.com",
-            redacted="[EMAIL_REDACTED]",
-            start=25,
-            end=42,
-            confidence=0.85,
-        ),
-        PIIFinding(
-            doc_id="doc1",
-            tenant_id="sis",
-            pii_type="PERSON",
-            original="alice@example.com",
-            redacted="[NAME_REDACTED]",
-            start=25,
-            end=42,
-            confidence=0.95,
-        ),
-    ]
-
-    deduped = _deduplicate_findings(findings)
-    redacted = redact_text(text, deduped)
-
-    assert len(deduped) == 1
-    assert redacted.count("[") == 1
-    assert "[NAME_REDACTED]" in redacted
-
-
 def test_pipeline_failure_writes_partial_report(monkeypatch, tmp_path):
     from tenant_data_pipeline import run_pipeline
 

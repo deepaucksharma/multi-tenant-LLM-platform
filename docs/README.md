@@ -27,7 +27,6 @@ Read this if you are new to the repo and want to understand what the platform do
 | [flows.md](flows.md) | Small diagrams for runtime and lifecycle flows | Request path, data path, training path, quality loop, voice path |
 | [subsystems.md](subsystems.md) | Condensed module and ownership map | Which folder owns which concern |
 | [operations.md](operations.md) | Commands, endpoints, artifacts, CI/CD | Running, inspecting, or operating the platform |
-| [huggingface-jobs.md](huggingface-jobs.md) | HF Jobs launcher, presets, and artifact strategy | Offloading training, evals, tests, and builds to Hugging Face compute |
 | [repo-map.md](repo-map.md) | High-signal directory guide | Where to start reading and what to ignore at first |
 
 ## System Surfaces
@@ -44,7 +43,7 @@ Read this if you are new to the repo and want to understand what the platform do
 
 | Area | What lives there | Main output |
 | --- | --- | --- |
-| Tenant data pipeline | Synthetic docs, ingest, PII redaction, chunking, dataset builders | Tenant datasets and cleaned chunks under `data/` |
+| Tenant data pipeline | Synthetic docs, ingest, chunking, dataset builders | Tenant datasets and processed chunks under `data/` |
 | RAG | Retrieval, hybrid ranking, prompt construction, grounding | Context, citations, and grounded prompts |
 | Training | SFT, DPO, adapter merge, runtime-adaptive model loading | Tenant adapters and training metadata |
 | Inference | Auth, routing, canary, audit logging, backend abstraction | Tenant-aware responses and feedback records |

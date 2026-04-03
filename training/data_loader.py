@@ -52,6 +52,17 @@ def load_sft_dataset(
         train_dataset = train_dataset.map(format_chat, remove_columns=train_dataset.column_names)
         eval_dataset = eval_dataset.map(format_chat, remove_columns=eval_dataset.column_names)
 
+        def truncate_text(example):
+            tokens = tokenizer(
+                example["text"],
+                truncation=True,
+                max_length=max_seq_length,
+            )
+            return {"text": tokenizer.decode(tokens["input_ids"], skip_special_tokens=False)}
+
+        train_dataset = train_dataset.map(truncate_text)
+        eval_dataset = eval_dataset.map(truncate_text)
+
     logger.info(f"SFT datasets ready: train={len(train_dataset)}, eval={len(eval_dataset)}")
     return train_dataset, eval_dataset
 

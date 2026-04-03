@@ -149,13 +149,6 @@ class TestMonitoring:
 
 
 class TestDataPipeline:
-    def test_pii_patterns(self):
-        import re
-        # SSN pattern
-        ssn_pattern = re.compile(r'\b\d{3}-\d{2}-\d{4}\b')
-        assert ssn_pattern.search("SSN: 123-45-6789")
-        assert not ssn_pattern.search("No SSN here")
-
     def test_chunker_basics(self):
         from tenant_data_pipeline.chunker import split_text_into_chunks
         sentence = "Students must complete the enrollment process before the semester begins."

@@ -111,24 +111,41 @@ def train_dpo_simple(
         )
         logger.info(f"DPO data: {len(train_dataset)} train, {len(eval_dataset)} eval")
 
+        smoke_cfg = config.get("smoke_test", {})
+        smoke_mode = smoke_cfg.get("enabled", False)
+        if smoke_mode:
+            train_limit = max(1, smoke_cfg.get("train_samples", 8))
+            eval_limit = max(1, smoke_cfg.get("eval_samples", 4))
+            train_dataset = train_dataset.select(range(min(len(train_dataset), train_limit)))
+            eval_dataset = eval_dataset.select(range(min(len(eval_dataset), eval_limit)))
+            smoke_seq_len = int(os.getenv("SMOKE_SEQ_LEN", "64"))
+            dpo_cfg["max_prompt_length"] = min(dpo_cfg.get("max_prompt_length", 256), smoke_seq_len // 2)
+            dpo_cfg["max_length"] = min(dpo_cfg.get("max_length", 512), smoke_seq_len)
+            os.environ["MLFLOW_TRACKING_URI"] = "file:./mlruns-smoke"
+            logger.info(
+                f"Smoke test mode enabled: train={len(train_dataset)} eval={len(eval_dataset)}, "
+                f"max_prompt_length={dpo_cfg['max_prompt_length']}, max_length={dpo_cfg['max_length']}"
+            )
+
         # ---- Train with ref_model=None (implicit reference from PEFT base) ----
         from trl import DPOTrainer, DPOConfig
 
         dpo_training_config = DPOConfig(
             output_dir=output_dir,
             num_train_epochs=train_cfg["num_train_epochs"],
+            max_steps=train_cfg.get("max_steps", -1),
             per_device_train_batch_size=1,
             per_device_eval_batch_size=1,
-            gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+            gradient_accumulation_steps=train_cfg.get("gradient_accumulation_steps", 1),
             learning_rate=train_cfg["learning_rate"],
             warmup_ratio=0.1,
             lr_scheduler_type="cosine",
-            logging_steps=2,
-            eval_strategy="epoch",
+            logging_steps=1 if smoke_mode else 2,
+            eval_strategy="no" if smoke_mode else "epoch",
             save_strategy="epoch",
-            save_total_limit=2,
+            save_total_limit=1 if smoke_mode else 2,
             fp16=runtime_cfg["fp16"],
-            gradient_checkpointing=True,
+            gradient_checkpointing=not smoke_mode,
             optim=runtime_cfg["optim"],
             seed=42,
             report_to="none",
@@ -138,6 +155,7 @@ def train_dpo_simple(
             max_prompt_length=dpo_cfg.get("max_prompt_length", 256),
             max_length=dpo_cfg.get("max_length", 512),
             use_cpu=runtime_cfg["device"] == "cpu",
+            load_best_model_at_end=not smoke_mode,
         )
 
         trainer = DPOTrainer(
@@ -222,6 +240,8 @@ def main():
     parser.add_argument("--sft-adapter", type=str, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--beta", type=float, default=None)
+    parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--max-steps", type=int, default=None)
     args = parser.parse_args()
 
     overrides = {}
@@ -229,6 +249,18 @@ def main():
         overrides.setdefault("training", {})["num_train_epochs"] = args.epochs
     if args.beta:
         overrides.setdefault("dpo", {})["beta"] = args.beta
+    if args.max_steps is not None:
+        overrides.setdefault("training", {})["max_steps"] = args.max_steps
+    if args.smoke_test:
+        max_steps = args.max_steps or 2
+        overrides.setdefault("training", {})["num_train_epochs"] = 1
+        overrides.setdefault("training", {})["max_steps"] = max_steps
+        overrides.setdefault("training", {})["gradient_accumulation_steps"] = 1
+        overrides["smoke_test"] = {
+            "enabled": True,
+            "train_samples": 8,
+            "eval_samples": 4,
+        }
 
     train_dpo_simple(
         args.tenant,

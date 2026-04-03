@@ -32,31 +32,6 @@ Repos default to **public** (enables free HF Inference API serving). Set `HF_REP
 | Build demo Docker image | `make docker-build` | Bundles API + Next.js UI for HF Spaces |
 | Run demo image locally | `make docker-run` | Runs on port 7860 with `.env` vars |
 
-## Hugging Face Jobs
-
-This repo now includes a Hugging Face Jobs launcher that submits remote jobs against a GitHub snapshot of the repository.
-Use it for ephemeral compute like tests, data generation, RAG indexing, evaluation, and training.
-Use Spaces for the long-lived demo surface.
-
-Important operational detail:
-
-- Jobs run the remote git ref, not your uncommitted local edits.
-- Jobs require paid Hugging Face credits.
-- Training artifacts are ephemeral unless you push them to the Hub or mount a bucket volume.
-- The launcher can mount an HF bucket with `--artifact-bucket owner/bucket` and copy selected outputs there.
-
-| Goal | Command | Notes |
-| --- | --- | --- |
-| List job presets | `make hf-jobs-list` | Shows the repo-specific HF Jobs tasks and suites |
-| View hardware flavors | `make hf-jobs-hardware` | Reads live hardware options from the Jobs API |
-| Submit CI-style suite | `make hf-jobs-ci` | Runs tests, module checks, data pipeline, eval, training smoke, web build |
-| Submit data/index/web build suite | `make hf-jobs-build` | Good for build verification without GPU training |
-| Submit both SFT runs | `make hf-jobs-train` | Starts one GPU job per tenant |
-| Submit both DPO runs | `make hf-jobs-align` | Starts one GPU job per tenant, each including SFT + DPO |
-| Submit one preset | `make hf-job PRESET=sft-sis` | Generic escape hatch for any launcher preset |
-
-See [huggingface-jobs.md](huggingface-jobs.md) for preset details, caveats, and examples.
-
 Hub repo naming convention:
 - Adapters: `deepaucksharma/multi-tenant-llm-{tenant}-{type}` (e.g. `…-sis-sft`)
 - Merged: `deepaucksharma/multi-tenant-llm-{tenant}-{type}-merged`

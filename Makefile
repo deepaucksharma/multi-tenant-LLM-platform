@@ -1,10 +1,8 @@
-.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama serve-hf-inference check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry push-hub-private push-hub-merged push-datasets push-datasets-dry generate-colab docker-build docker-run eval web mobile voice monitor test hf-job hf-jobs-list hf-jobs-hardware hf-jobs-ci hf-jobs-build hf-jobs-train hf-jobs-align clean all
+.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama serve-hf-inference check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry push-hub-private push-hub-merged push-datasets push-datasets-dry generate-colab docker-build docker-run eval web mobile voice monitor test clean all smoke-data smoke-index smoke-train-sis smoke-train-mfg smoke-dpo smoke-inference smoke-eval smoke-pipeline
 
 PYTHON ?= python3
 PIP ?= pip3
 VENV := venv
-PRESET ?=
-JOB_ID ?=
 
 # ── Environment ────────────────────────────────────────────────────────────────
 setup:
@@ -52,6 +50,84 @@ train-smoke:
 
 train-smoke-tiny:
 	SMOKE_TEST_BASE_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0 $(PYTHON) -m training.sft_train --tenant sis --smoke-test
+
+# ── Comprehensive Smoke Pipeline (Both Tenants) ───────────────────────────────
+
+## Generate synthetic data for both tenants
+smoke-data:
+	@echo "🔄 Running smoke data pipeline for both tenants..."
+	$(PYTHON) -m tenant_data_pipeline.run_pipeline
+
+## Build RAG indexes for both tenants
+smoke-index:
+	@echo "🔄 Building smoke RAG indexes for both tenants..."
+	$(PYTHON) -m rag.build_index --force
+
+## Train SFT adapter for SIS tenant (smoke mode, optimized)
+smoke-train-sis:
+	@echo "🔄 Training smoke SFT adapter for SIS..."
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=256 \
+	$(PYTHON) -m training.sft_train --tenant sis --smoke-test --max-steps 1
+
+## Train SFT adapter for MFG tenant (smoke mode, optimized)
+smoke-train-mfg:
+	@echo "🔄 Training smoke SFT adapter for MFG..."
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=64 SMOKE_N_LAYER=1 SMOKE_N_EMBD=32 \
+	$(PYTHON) -m training.sft_train --tenant mfg --smoke-test --max-steps 1
+
+## Train DPO alignment for SIS tenant (smoke mode, optimized)
+smoke-dpo:
+	@echo "🔄 Training smoke DPO alignment for SIS..."
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=64 SMOKE_N_LAYER=1 SMOKE_N_EMBD=32 \
+	$(PYTHON) -m training.dpo_train_simple --tenant sis --smoke-test --max-steps 1
+
+## Quick offline smoke validation: SFT for both tenants + DPO for SIS (fastest path)
+train-smoke-offline:
+	@echo "🔄 Running fast offline smoke validation..."
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=64 SMOKE_N_LAYER=1 SMOKE_N_EMBD=32 \
+	$(PYTHON) -m training.sft_train --tenant sis --smoke-test --max-steps 1 && \
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=64 SMOKE_N_LAYER=1 SMOKE_N_EMBD=32 \
+	$(PYTHON) -m training.sft_train --tenant mfg --smoke-test --max-steps 1 && \
+	DEVICE=cpu MLFLOW_TRACKING_URI=file:./mlruns-smoke \
+	SMOKE_TEST_LOCAL_MODEL_PATH=./models/base/smoke-gpt2 \
+	SMOKE_TEST_BASE_MODEL= \
+	SMOKE_SEQ_LEN=64 SMOKE_N_LAYER=1 SMOKE_N_EMBD=32 \
+	$(PYTHON) -m training.dpo_train_simple --tenant sis --smoke-test --max-steps 1 && \
+	@echo "✅ All smoke training passed: SIS SFT, MFG SFT, SIS DPO"
+
+## Test inference for both tenants (smoke mode)
+smoke-inference:
+	@echo "🔄 Testing smoke inference for both tenants..."
+	$(PYTHON) -m inference.app --smoke-test
+	pkill -f "inference.app"
+	sleep 2
+
+## Run evaluation suite for both tenants (smoke mode)
+smoke-eval:
+	@echo "🔄 Running smoke evaluation for both tenants..."
+	$(PYTHON) -m evaluation.run_all_evals --tenant sis
+	$(PYTHON) -m evaluation.run_all_evals --tenant mfg
+
+## Complete smoke pipeline: data → index → train both → dpo → inference → eval
+smoke-pipeline: smoke-data smoke-index smoke-train-sis smoke-train-mfg smoke-dpo smoke-inference smoke-eval
+	@echo "🎉 Complete smoke pipeline validation finished!"
+	@echo "✅ Both SIS and MFG tenants validated end-to-end"
+	@echo "✅ Data pipeline, RAG indexing, SFT training, DPO alignment, inference, and evaluation all working"
 
 dpo:
 	$(PYTHON) -m training.dpo_train --tenant sis
@@ -164,31 +240,6 @@ test:
 
 test-cov:
 	$(PYTHON) -m pytest tests/ --cov --cov-report=html
-
-# ── Hugging Face Jobs ──────────────────────────────────────────────────────────
-hf-jobs-list:
-	$(PYTHON) scripts/hf_jobs.py list
-
-hf-jobs-hardware:
-	$(PYTHON) scripts/hf_jobs.py hardware
-
-hf-jobs-ci:
-	$(PYTHON) scripts/hf_jobs.py submit --suite ci
-
-hf-jobs-build:
-	$(PYTHON) scripts/hf_jobs.py submit --suite build-all
-
-hf-jobs-train:
-	$(PYTHON) scripts/hf_jobs.py submit --suite train-all
-
-hf-jobs-align:
-	$(PYTHON) scripts/hf_jobs.py submit --suite align-all
-
-hf-job:
-ifndef PRESET
-	$(error Usage: make hf-job PRESET=<preset-name>)
-endif
-	$(PYTHON) scripts/hf_jobs.py submit $(PRESET)
 
 # ── Full pipeline ──────────────────────────────────────────────────────────────
 all: data index train serve

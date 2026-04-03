@@ -4,8 +4,8 @@ Generates instruction-response pairs in chat format for TRL SFTTrainer.
 
 Grounding strategy
 ------------------
-When ingested / redacted / chunked documents exist (``chunks_dir/chunks.json``
-or ``processed_dir/redacted_documents.json`` → ``ingested_documents.json``),
+When ingested / chunked documents exist (``chunks_dir/chunks.json`` or
+``processed_dir/ingested_documents.json``),
 they are converted into instruction-response pairs that are **merged** with the
 hardcoded seed examples below.  The seed examples are always included so that
 CI / smoke tests work even with an empty document corpus.  Corpus-derived
@@ -220,8 +220,7 @@ def _load_chunks(tenant_id: str) -> List[Dict]:
 
     Lookup order:
     1. ``chunks_dir/chunks.json``  (preferred — post-chunker output)
-    2. ``processed_dir/redacted_documents.json``  (post-PII redaction)
-    3. ``processed_dir/ingested_documents.json``  (raw ingest output)
+    2. ``processed_dir/ingested_documents.json``  (raw ingest output)
 
     Returns a list of chunk dicts (each with at least ``content`` and
     ``topic`` keys).  Returns an empty list if no processed data exists yet.
@@ -229,7 +228,6 @@ def _load_chunks(tenant_id: str) -> List[Dict]:
     config = TENANTS[tenant_id]
     candidates = [
         config.chunks_dir / "chunks.json",
-        config.processed_dir / "redacted_documents.json",
         config.processed_dir / "ingested_documents.json",
     ]
     for path in candidates:
@@ -270,7 +268,7 @@ def _chunks_to_sft_examples(chunks: List[Dict], tenant_id: str) -> List[Dict]:
     """
     examples: List[Dict] = []
     for item in chunks:
-        content = item.get("content_redacted") or item.get("content", "")
+        content = item.get("content", "")
         if not content or len(content.strip()) < 80:
             continue
         topic = item.get("topic", "general")

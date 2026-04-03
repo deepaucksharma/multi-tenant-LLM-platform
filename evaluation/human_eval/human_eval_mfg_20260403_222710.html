@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Human Evaluation — MFG</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+        .eval-item { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .question, .response, .reference { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 4px; }
+        .dimension { margin: 5px 0; }
+        .flags label { margin-right: 15px; }
+        textarea { width: 100%; }
+        h3 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Human Evaluation Form — MFG</h1>
+    <p>Form ID: human_eval_mfg_20260403_222710</p>
+    <p>Evaluator: <input type="text" name="evaluator_name" placeholder="Your name"></p>
+    <p>Role: <input type="text" name="evaluator_role" placeholder="Your role"></p>
+    <form method="post">
+        
+        <div class="eval-item">
+            <h3>Qmfg_001: sop</h3>
+            <div class="question"><strong>Question:</strong> What is the correct startup sequence for the assembly line?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The startup sequence is: 1) Activate main power at electrical panel, 2) Initialize PLC and wait for ready status, 3) Start conveyor at low speed for 2-minute warm-up, 4) Activate station equipment in sequence 1-12, 5) Run 5 test units through line and inspect each, 6) If test units pass increase to production speed, 7) Log completion in MES.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_001_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_001_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_001_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_001_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_001_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_001_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_001_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_001_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_001_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_001_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_001_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_001_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_001_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_001_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_001_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_001_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_001_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_001_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_001_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_001_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_001_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_001_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_001_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_001_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_001_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_001_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_001_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_001_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_001_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_001_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_001_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_001_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_001_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_001_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_001_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_001_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_001_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_002: sop</h3>
+            <div class="question"><strong>Question:</strong> What should an operator do if a pre-startup check fails?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The operator must NOT proceed with startup. They must contact the shift supervisor immediately. The abnormal condition must be logged as an incident in the quality management system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_002_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_002_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_002_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_002_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_002_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_002_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_002_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_002_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_002_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_002_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_002_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_002_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_002_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_002_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_002_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_002_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_002_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_002_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_002_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_002_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_002_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_002_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_002_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_002_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_002_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_002_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_002_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_002_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_002_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_002_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_002_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_002_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_002_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_002_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_002_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_002_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_002_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_003: defects</h3>
+            <div class="question"><strong>Question:</strong> What are the three defect severity levels and what action does each require?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Critical (Class 1): causes safety hazard or complete failure, requires immediate line stop, quarantine, and CAPA. Major (Class 2): significantly reduces functionality, requires unit rejection and increased inspection. Minor (Class 3): does not affect function or safety, requires logging and repair if viable.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_003_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_003_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_003_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_003_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_003_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_003_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_003_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_003_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_003_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_003_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_003_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_003_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_003_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_003_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_003_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_003_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_003_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_003_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_003_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_003_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_003_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_003_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_003_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_003_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_003_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_003_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_003_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_003_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_003_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_003_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_003_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_003_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_003_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_003_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_003_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_003_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_003_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_004: defects</h3>
+            <div class="question"><strong>Question:</strong> Within what timeframe must the Quality Manager be notified of a Class 1 defect?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The Quality Manager must be notified within 1 hour of a Class 1 critical defect. The customer must be notified within 24 hours.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_004_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_004_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_004_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_004_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_004_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_004_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_004_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_004_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_004_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_004_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_004_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_004_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_004_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_004_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_004_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_004_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_004_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_004_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_004_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_004_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_004_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_004_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_004_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_004_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_004_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_004_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_004_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_004_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_004_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_004_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_004_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_004_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_004_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_004_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_004_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_004_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_004_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_005: capa</h3>
+            <div class="question"><strong>Question:</strong> What are the seven steps of the CAPA process?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>1) Identification (within 24 hours), 2) Containment (within 48 hours), 3) Root Cause Analysis (within 15 business days), 4) Corrective Action Plan (within 20 business days), 5) Implementation (per plan timeline), 6) Effectiveness Verification (30-90 days post-implementation), 7) Closure (Quality Manager approval).</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_005_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_005_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_005_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_005_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_005_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_005_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_005_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_005_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_005_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_005_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_005_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_005_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_005_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_005_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_005_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_005_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_005_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_005_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_005_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_005_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_005_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_005_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_005_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_005_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_005_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_005_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_005_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_005_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_005_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_005_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_005_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_005_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_005_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_005_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_005_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_005_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_005_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_006: capa</h3>
+            <div class="question"><strong>Question:</strong> What root cause analysis methodologies are approved?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Approved methodologies include 5-Why Analysis, Fishbone (Ishikawa) Diagram, 8D Problem Solving, and Fault Tree Analysis.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_006_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_006_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_006_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_006_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_006_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_006_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_006_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_006_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_006_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_006_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_006_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_006_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_006_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_006_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_006_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_006_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_006_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_006_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_006_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_006_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_006_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_006_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_006_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_006_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_006_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_006_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_006_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_006_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_006_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_006_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_006_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_006_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_006_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_006_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_006_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_006_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_006_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_007: maintenance</h3>
+            <div class="question"><strong>Question:</strong> What is the lockout/tagout procedure?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>LOTO procedure: notify affected personnel, shut down equipment, isolate energy sources, apply personal lock and tag, verify zero energy state, perform maintenance, remove LOTO in reverse order, test equipment, return to service. Each technician uses their own uniquely keyed lock.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_007_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_007_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_007_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_007_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_007_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_007_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_007_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_007_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_007_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_007_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_007_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_007_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_007_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_007_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_007_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_007_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_007_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_007_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_007_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_007_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_007_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_007_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_007_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_007_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_007_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_007_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_007_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_007_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_007_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_007_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_007_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_007_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_007_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_007_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_007_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_007_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_007_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_008: maintenance</h3>
+            <div class="question"><strong>Question:</strong> What are the maintenance priority response times?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>P1-Emergency: respond within 1 hour. P2-Urgent: within 4 hours. P3-Standard: within 24 hours. P4-Planned: scheduled maintenance window.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_008_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_008_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_008_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_008_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_008_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_008_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_008_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_008_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_008_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_008_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_008_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_008_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_008_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_008_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_008_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_008_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_008_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_008_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_008_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_008_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_008_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_008_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_008_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_008_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_008_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_008_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_008_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_008_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_008_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_008_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_008_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_008_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_008_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_008_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_008_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_008_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_008_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_009: safety</h3>
+            <div class="question"><strong>Question:</strong> What is the emergency procedure for a chemical spill?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Evacuate the immediate area, notify EHS department, do NOT attempt cleanup unless trained. Spill kit locations are marked on floor plans. All incidents must be reported within 4 hours in the EHS system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_009_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_009_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_009_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_009_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_009_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_009_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_009_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_009_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_009_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_009_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_009_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_009_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_009_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_009_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_009_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_009_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_009_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_009_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_009_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_009_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_009_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_009_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_009_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_009_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_009_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_009_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_009_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_009_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_009_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_009_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_009_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_009_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_009_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_009_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_009_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_009_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_009_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_010: safety</h3>
+            <div class="question"><strong>Question:</strong> What is the maximum weight an employee can lift without mechanical assistance?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The maximum lift weight without mechanical assistance is 50 pounds.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_010_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_010_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_010_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_010_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_010_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_010_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_010_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_010_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_010_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_010_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_010_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_010_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_010_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_010_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_010_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_010_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_010_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_010_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_010_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_010_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_010_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_010_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_010_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_010_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_010_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_010_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_010_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_010_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_010_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_010_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_010_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_010_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_010_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_010_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_010_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_010_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_010_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_011: quality</h3>
+            <div class="question"><strong>Question:</strong> When is First Article Inspection required?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>FAI is required at the start of each production run and after any setup change. FAI checks all dimensions and characteristics per the control plan.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_011_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_011_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_011_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_011_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_011_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_011_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_011_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_011_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_011_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_011_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_011_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_011_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_011_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_011_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_011_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_011_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_011_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_011_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_011_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_011_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_011_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_011_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_011_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_011_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_011_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_011_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_011_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_011_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_011_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_011_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_011_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_011_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_011_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_011_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_011_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_011_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_011_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_012: quality</h3>
+            <div class="question"><strong>Question:</strong> What does a red calibration sticker on a measuring instrument mean?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>A red calibration sticker indicates the instrument is out of calibration and must NOT be used. Only instruments with green stickers (current calibration) should be used.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_012_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_012_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_012_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_012_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_012_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_012_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_012_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_012_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_012_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_012_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_012_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_012_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_012_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_012_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_012_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_012_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_012_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_012_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_012_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_012_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_012_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_012_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_012_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_012_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_012_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_012_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_012_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_012_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_012_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_012_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_012_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_012_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_012_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_012_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_012_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_012_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_012_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_013: iso</h3>
+            <div class="question"><strong>Question:</strong> What is the document numbering format for the QMS?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Documents follow the format QMS-[TYPE]-[NUMBER]-[REV], for example QMS-SOP-001-R3.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_013_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_013_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_013_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_013_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_013_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_013_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_013_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_013_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_013_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_013_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_013_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_013_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_013_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_013_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_013_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_013_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_013_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_013_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_013_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_013_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_013_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_013_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_013_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_013_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_013_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_013_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_013_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_013_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_013_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_013_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_013_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_013_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_013_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_013_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_013_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_013_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_013_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_014: iso</h3>
+            <div class="question"><strong>Question:</strong> How is the Risk Priority Number calculated in FMEA?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>RPN is calculated as Severity times Occurrence times Detection. Actions are required for RPN exceeding 100 or when Severity is 8 or higher.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_014_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_014_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_014_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_014_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_014_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_014_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_014_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_014_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_014_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_014_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_014_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_014_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_014_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_014_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_014_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_014_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_014_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_014_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_014_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_014_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_014_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_014_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_014_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_014_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_014_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_014_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_014_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_014_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_014_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_014_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_014_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_014_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_014_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_014_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_014_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_014_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_014_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_015: scheduling</h3>
+            <div class="question"><strong>Question:</strong> What is the target changeover time for same product family?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The target changeover time is less than 30 minutes for the same product family.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_015_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_015_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_015_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_015_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_015_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_015_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_015_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_015_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_015_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_015_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_015_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_015_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_015_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_015_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_015_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_015_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_015_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_015_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_015_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_015_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_015_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_015_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_015_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_015_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_015_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_015_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_015_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_015_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_015_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_015_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_015_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_015_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_015_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_015_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_015_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_015_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_015_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_016: regulatory</h3>
+            <div class="question"><strong>Question:</strong> What are the record retention requirements for quality and safety records?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Quality records: minimum 7 years. Safety records and OSHA logs: minimum 5 years. Environmental records: minimum 5 years. Training records: employment duration plus 5 years. Product liability records: product lifetime plus 10 years.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_016_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_016_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_016_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_016_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_016_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_016_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_016_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_016_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_016_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_016_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_016_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_016_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_016_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_016_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_016_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_016_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_016_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_016_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_016_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_016_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_016_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_016_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_016_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_016_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_016_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_016_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_016_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_016_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_016_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_016_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_016_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_016_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_016_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_016_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_016_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_016_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_016_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_017: inventory</h3>
+            <div class="question"><strong>Question:</strong> What is the cycle count schedule based on ABC classification?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>A items (80% of value) counted monthly, B items (15% of value) counted quarterly, C items (5% of value) counted semi-annually. Annual physical inventory in December. Accuracy target above 98%.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_017_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_017_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_017_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_017_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_017_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_017_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_017_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_017_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_017_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_017_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_017_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_017_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_017_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_017_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_017_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_017_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_017_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_017_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_017_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_017_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_017_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_017_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_017_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_017_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_017_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_017_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_017_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_017_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_017_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_017_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_017_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_017_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_017_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_017_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_017_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_017_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_017_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_018: cross_domain</h3>
+            <div class="question"><strong>Question:</strong> What is the FERPA policy on student record disclosure?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>I don't have information about FERPA or student records. My expertise covers manufacturing operations, quality control, and safety procedures. Please consult the appropriate education or student information system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_018_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_018_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_018_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_018_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_018_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_018_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_018_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_018_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_018_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_018_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_018_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_018_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_018_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_018_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_018_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_018_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_018_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_018_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_018_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_018_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_018_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_018_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_018_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_018_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_018_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_018_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_018_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_018_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_018_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_018_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_018_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_018_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_018_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_018_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_018_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_018_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_018_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_019: cross_domain</h3>
+            <div class="question"><strong>Question:</strong> How do I enroll a new student in the school?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>I don't have information about student enrollment. My knowledge covers manufacturing operations. Please direct education-related questions to the appropriate system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_019_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_019_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_019_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_019_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_019_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_019_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_019_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_019_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_019_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_019_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_019_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_019_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_019_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_019_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_019_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_019_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_019_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_019_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_019_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_019_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_019_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_019_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_019_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_019_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_019_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_019_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_019_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_019_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_019_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_019_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_019_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_019_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_019_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_019_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_019_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_019_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_019_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qmfg_020: quality</h3>
+            <div class="question"><strong>Question:</strong> How quickly must forward and reverse traceability be achievable for a recall scenario?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Both forward and reverse traceability must be achievable within 4 hours.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="mfg_020_accuracy" value="1"> 1</label> <label><input type="radio" name="mfg_020_accuracy" value="2"> 2</label> <label><input type="radio" name="mfg_020_accuracy" value="3"> 3</label> <label><input type="radio" name="mfg_020_accuracy" value="4"> 4</label> <label><input type="radio" name="mfg_020_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="mfg_020_completeness" value="1"> 1</label> <label><input type="radio" name="mfg_020_completeness" value="2"> 2</label> <label><input type="radio" name="mfg_020_completeness" value="3"> 3</label> <label><input type="radio" name="mfg_020_completeness" value="4"> 4</label> <label><input type="radio" name="mfg_020_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="mfg_020_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="mfg_020_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="mfg_020_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="mfg_020_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="mfg_020_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="mfg_020_policy_compliance" value="1"> 1</label> <label><input type="radio" name="mfg_020_policy_compliance" value="2"> 2</label> <label><input type="radio" name="mfg_020_policy_compliance" value="3"> 3</label> <label><input type="radio" name="mfg_020_policy_compliance" value="4"> 4</label> <label><input type="radio" name="mfg_020_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="mfg_020_usefulness" value="1"> 1</label> <label><input type="radio" name="mfg_020_usefulness" value="2"> 2</label> <label><input type="radio" name="mfg_020_usefulness" value="3"> 3</label> <label><input type="radio" name="mfg_020_usefulness" value="4"> 4</label> <label><input type="radio" name="mfg_020_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="mfg_020_tone_and_style" value="1"> 1</label> <label><input type="radio" name="mfg_020_tone_and_style" value="2"> 2</label> <label><input type="radio" name="mfg_020_tone_and_style" value="3"> 3</label> <label><input type="radio" name="mfg_020_tone_and_style" value="4"> 4</label> <label><input type="radio" name="mfg_020_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="mfg_020_hallucination"> Hallucination</label> <label><input type="checkbox" name="mfg_020_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="mfg_020_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="mfg_020_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="mfg_020_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="mfg_020_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="mfg_020_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <button type="submit" style="padding: 10px 30px; font-size: 16px;">Submit Evaluation</button>
+    </form>
+</body>
+</html>

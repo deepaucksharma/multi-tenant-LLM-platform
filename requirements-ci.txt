@@ -27,6 +27,3 @@ sse-starlette>=1.8.0
 
 # Database
 sqlite3; python_version >= '3.0'  # Built-in, but explicit for clarity
-
-# HF Jobs launcher tests / tooling
-huggingface-hub>=1.8.0

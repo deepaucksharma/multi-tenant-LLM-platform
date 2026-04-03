@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from training.config_loader import get_sft_config
-from training.model_loader import resolve_model_source
+from training.model_loader import resolve_model_source, _ensure_local_smoke_model
 
 
 def build_report(tenant: str, smoke_test: bool) -> dict:
@@ -19,6 +19,8 @@ def build_report(tenant: str, smoke_test: bool) -> dict:
         cfg["smoke_test"] = {"enabled": True}
 
     resolved = resolve_model_source(cfg, smoke_test=smoke_test)
+    if smoke_test and not Path(resolved).exists():
+        resolved = _ensure_local_smoke_model(cfg)
     resolved_path = Path(resolved)
     is_local_dir = resolved_path.exists()
     has_files = is_local_dir and any(resolved_path.iterdir())

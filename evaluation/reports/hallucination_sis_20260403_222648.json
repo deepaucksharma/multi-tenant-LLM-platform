@@ -1,0 +1,66 @@
+{
+  "report_id": "20260403_222648",
+  "tenant_id": "sis",
+  "model_version": "hallucination_checker",
+  "eval_type": "hallucination",
+  "timestamp": "2026-04-03T22:26:48.941261",
+  "total_tests": 3,
+  "passed": 3,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "scores": {
+    "detection_accuracy": 1.0,
+    "avg_good_score": 0.805,
+    "avg_bad_score": 0.036
+  },
+  "results": [
+    {
+      "test_id": "hall_sis_001",
+      "question": "What is the enrollment process?",
+      "good_response_score": 0.941,
+      "bad_response_score": 0.086,
+      "good_fabricated_numbers": [],
+      "bad_fabricated_numbers": [
+        "24",
+        "200"
+      ],
+      "good_unsupported_procedures": [],
+      "bad_unsupported_procedures": [],
+      "detection_correct": true,
+      "passed": true
+    },
+    {
+      "test_id": "hall_sis_002",
+      "question": "How are grades calculated?",
+      "good_response_score": 0.533,
+      "bad_response_score": 0.0,
+      "good_fabricated_numbers": [],
+      "bad_fabricated_numbers": [
+        "3.5",
+        "500"
+      ],
+      "good_unsupported_procedures": [],
+      "bad_unsupported_procedures": [
+        "maintain a 3"
+      ],
+      "detection_correct": true,
+      "passed": true
+    },
+    {
+      "test_id": "hall_sis_003",
+      "question": "What are the attendance requirements?",
+      "good_response_score": 0.941,
+      "bad_response_score": 0.022,
+      "good_fabricated_numbers": [],
+      "bad_fabricated_numbers": [
+        "30",
+        "20"
+      ],
+      "good_unsupported_procedures": [],
+      "bad_unsupported_procedures": [],
+      "detection_correct": true,
+      "passed": true
+    }
+  ],
+  "summary": "Hallucination detection SIS: 3/3 (100%) correct detections"
+}
