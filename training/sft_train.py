@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from training.config_loader import get_sft_config
+from training.config_loader import get_sft_config, deep_merge
 from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
@@ -46,12 +46,11 @@ def train_sft(tenant_id: str, config_override: dict = None):
     # Load config
     config = get_sft_config(tenant_id)
     if config_override:
-        config.update(config_override)
-
-        train_cfg = config["training"]
-        model_cfg = config["model"]
-        tenant_cfg = config["tenant"]
-        runtime_cfg = get_training_runtime_config(config)
+        config = deep_merge(config, config_override)
+    train_cfg = config["training"]
+    model_cfg = config["model"]
+    tenant_cfg = config["tenant"]
+    runtime_cfg = get_training_runtime_config(config)
 
     # Initialize tracking
     tracker = ExperimentTracker(
@@ -117,6 +116,16 @@ def train_sft(tenant_id: str, config_override: dict = None):
         })
         logger.info(f"Dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
 
+        smoke_cfg = config.get("smoke_test", {})
+        if smoke_cfg.get("enabled", False):
+            train_limit = max(1, smoke_cfg.get("train_samples", 8))
+            eval_limit = max(1, smoke_cfg.get("eval_samples", 4))
+            train_dataset = train_dataset.select(range(min(len(train_dataset), train_limit)))
+            eval_dataset = eval_dataset.select(range(min(len(eval_dataset), eval_limit)))
+            logger.info(
+                f"Smoke test mode enabled: train={len(train_dataset)} eval={len(eval_dataset)}"
+            )
+
         # ---- Configure trainer ----
         from transformers import TrainingArguments
         from trl import SFTTrainer
@@ -124,9 +133,15 @@ def train_sft(tenant_id: str, config_override: dict = None):
         output_dir = train_cfg["output_dir"]
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+        # load_best_model_at_end requires at least one evaluation during training.
+        # In smoke-test mode max_steps is tiny (e.g. 2) so we must disable it to
+        # avoid a trainer crash when no checkpoint has been saved yet.
+        smoke_mode = config.get("smoke_test", {}).get("enabled", False)
+
         training_args = TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=train_cfg["num_train_epochs"],
+            max_steps=train_cfg.get("max_steps", -1),
             per_device_train_batch_size=train_cfg["per_device_train_batch_size"],
             per_device_eval_batch_size=train_cfg["per_device_eval_batch_size"],
             gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
@@ -148,7 +163,7 @@ def train_sft(tenant_id: str, config_override: dict = None):
             max_grad_norm=train_cfg.get("max_grad_norm", 1.0),
             seed=train_cfg.get("seed", 42),
             report_to="none",  # We handle tracking ourselves
-            load_best_model_at_end=True,
+            load_best_model_at_end=not smoke_mode,  # Disabled in smoke: no checkpoint saved
             metric_for_best_model="eval_loss",
             greater_is_better=False,
             remove_unused_columns=False,
@@ -302,6 +317,14 @@ def main():
         "--batch-size", type=int, default=None,
         help="Override batch size",
     )
+    parser.add_argument(
+        "--smoke-test", action="store_true",
+        help="Run a tiny smoke-test training job with truncated datasets",
+    )
+    parser.add_argument(
+        "--max-steps", type=int, default=None,
+        help="Override max training steps",
+    )
     args = parser.parse_args()
 
     overrides = {}
@@ -311,6 +334,25 @@ def main():
         overrides.setdefault("training", {})["learning_rate"] = args.lr
     if args.batch_size:
         overrides.setdefault("training", {})["per_device_train_batch_size"] = args.batch_size
+    if args.max_steps is not None:
+        overrides.setdefault("training", {})["max_steps"] = args.max_steps
+    if args.smoke_test:
+        max_steps = args.max_steps or 2
+        overrides.setdefault("training", {})["num_train_epochs"] = 1
+        overrides.setdefault("training", {})["save_steps"] = max_steps
+        # eval_steps must be <= max_steps so at least one evaluation fires
+        overrides.setdefault("training", {})["eval_steps"] = max_steps
+        overrides.setdefault("training", {})["logging_steps"] = 1
+        overrides.setdefault("training", {})["save_total_limit"] = 1
+        overrides.setdefault("training", {})["per_device_train_batch_size"] = 1
+        overrides.setdefault("training", {})["per_device_eval_batch_size"] = 1
+        overrides.setdefault("training", {})["gradient_accumulation_steps"] = 1
+        overrides.setdefault("training", {})["max_steps"] = max_steps
+        overrides["smoke_test"] = {
+            "enabled": True,
+            "train_samples": 8,
+            "eval_samples": 4,
+        }
 
     result = train_sft(args.tenant, config_override=overrides if overrides else None)
     print(f"\nResult: {json.dumps(result, indent=2, default=str)}")

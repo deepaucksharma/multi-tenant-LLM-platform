@@ -26,27 +26,14 @@ class TenantRoute:
 
 
 # Tenant routing table
-# Topics are imported from the pipeline config to ensure a single source of truth.
-# System prompts and policies are inference-layer concerns and live here.
+# Topics and system prompts are imported from the pipeline config to ensure a single source of truth.
+# Policies remain inference-layer concerns and live here.
 TENANT_ROUTES: Dict[str, Dict] = {
     "sis": {
         "domain": "Student Information System / Education",
-        "system_prompt": (
-            "You are an expert Student Information System assistant for District 42. "
-            "You help school administrators, teachers, and staff with questions about "
-            "enrollment, attendance, grading, transcripts, student records, accommodations, "
-            "disciplinary procedures, and FERPA compliance.\n\n"
-            "CRITICAL RULES:\n"
-            "1. NEVER disclose student personally identifiable information (PII)\n"
-            "2. Always comply with FERPA regulations\n"
-            "3. Only answer based on the provided knowledge base context\n"
-            "4. Include citations from source documents when available\n"
-            "5. If you don't have enough information, say so clearly\n"
-            "6. If asked about topics outside education/SIS, politely redirect"
-        ),
+        "system_prompt": _PIPELINE_TENANTS["sis"].system_prompt,
         "rag_collection": "tenant_sis_docs",
         "default_model_type": "sft",
-        # Pulled from pipeline config — do NOT duplicate here
         "topics": _PIPELINE_TENANTS["sis"].topics,
         "policies": [
             "FERPA: Never disclose student PII without proper authorization",
@@ -57,23 +44,9 @@ TENANT_ROUTES: Dict[str, Dict] = {
     },
     "mfg": {
         "domain": "Manufacturing / Industrial Quality Control",
-        "system_prompt": (
-            "You are an expert manufacturing quality and operations assistant. "
-            "You help production operators, quality engineers, and maintenance personnel "
-            "with questions about SOPs, quality control, defect classification, CAPA processes, "
-            "machine maintenance, safety protocols, ISO documentation, and regulatory compliance.\n\n"
-            "CRITICAL RULES:\n"
-            "1. ALWAYS prioritize safety in your responses\n"
-            "2. NEVER suggest bypassing safety procedures or skipping inspections\n"
-            "3. Only answer based on the provided knowledge base context\n"
-            "4. Include citations from source documents when available\n"
-            "5. If you don't have enough information, say so clearly\n"
-            "6. If asked about topics outside manufacturing/quality, politely redirect\n"
-            "7. When in doubt about safety, recommend consulting a supervisor"
-        ),
+        "system_prompt": _PIPELINE_TENANTS["mfg"].system_prompt,
         "rag_collection": "tenant_mfg_docs",
         "default_model_type": "sft",
-        # Pulled from pipeline config — do NOT duplicate here
         "topics": _PIPELINE_TENANTS["mfg"].topics,
         "policies": [
             "Safety: Never bypass LOTO procedures",
@@ -105,7 +78,31 @@ def get_tenant_route(tenant_id: str, model_type: str = None) -> TenantRoute:
 
     effective_model_type = model_type or route_config.get("default_model_type", "sft")
     manager = get_adapter_manager()
+
     adapter_key = manager.get_adapter_key(tenant_id, effective_model_type)
+
+    # Cold-start fix: if the manager hasn't loaded the base model yet,
+    # _available_adapters is empty and get_adapter_key() always returns "",
+    # causing the first tenant request to run on the bare base model.
+    # We trigger model loading here so that _scan_adapters() populates
+    # _available_adapters before we commit to the empty adapter key.
+    if adapter_key == "" and not manager.is_loaded:
+        logger.info(
+            f"[{tenant_id}] Cold-start detected — loading base model and "
+            f"scanning adapters before resolving route."
+        )
+        manager.load_base_model()  # also calls _scan_adapters() internally
+        # Re-resolve now that _available_adapters is populated.
+        adapter_key = manager.get_adapter_key(tenant_id, effective_model_type)
+        if adapter_key:
+            logger.info(
+                f"[{tenant_id}] Post-load adapter resolved: '{adapter_key}'"
+            )
+        else:
+            logger.info(
+                f"[{tenant_id}] No trained adapter found for '{effective_model_type}'; "
+                f"will serve from base model."
+            )
 
     return TenantRoute(
         tenant_id=tenant_id,

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from training.config_loader import get_dpo_config, get_sft_config
+from training.config_loader import get_dpo_config, get_sft_config, deep_merge
 from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
@@ -30,7 +30,11 @@ from training.data_loader import load_dpo_dataset
 from training.mlflow_utils import ExperimentTracker, ModelRegistry
 
 
-def train_dpo_simple(tenant_id: str):
+def train_dpo_simple(
+    tenant_id: str,
+    sft_adapter_path: str = None,
+    config_override: dict = None,
+):
     """
     Simplified DPO: uses model itself as implicit reference via PEFT.
     TRL's DPOTrainer can use ref_model=None when the model is a PeftModel,
@@ -45,6 +49,8 @@ def train_dpo_simple(tenant_id: str):
     dpo_config = get_dpo_config()
     sft_config = get_sft_config(tenant_id)
     config = {**sft_config, "dpo": dpo_config.get("dpo", {}), "training": dpo_config.get("training", {})}
+    if config_override:
+        config = deep_merge(config, config_override)
 
     train_cfg = config["training"]
     model_cfg = config["model"]
@@ -54,7 +60,8 @@ def train_dpo_simple(tenant_id: str):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Check for SFT adapter
-    sft_adapter_path = f"./models/adapters/{tenant_id}/sft"
+    if sft_adapter_path is None:
+        sft_adapter_path = f"./models/adapters/{tenant_id}/sft"
     has_sft = Path(sft_adapter_path).exists() and (Path(sft_adapter_path) / "adapter_config.json").exists()
 
     # Tracking
@@ -210,10 +217,24 @@ def train_dpo_simple(tenant_id: str):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Simplified DPO Training")
     parser.add_argument("--tenant", type=str, required=True, choices=["sis", "mfg"])
+    parser.add_argument("--sft-adapter", type=str, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--beta", type=float, default=None)
     args = parser.parse_args()
-    train_dpo_simple(args.tenant)
+
+    overrides = {}
+    if args.epochs:
+        overrides.setdefault("training", {})["num_train_epochs"] = args.epochs
+    if args.beta:
+        overrides.setdefault("dpo", {})["beta"] = args.beta
+
+    train_dpo_simple(
+        args.tenant,
+        sft_adapter_path=args.sft_adapter,
+        config_override=overrides if overrides else None,
+    )
 
 
 if __name__ == "__main__":

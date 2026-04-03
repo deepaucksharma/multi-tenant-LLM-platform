@@ -29,8 +29,6 @@ class HFBackend:
     def prepare_route(self, route):
         if not self._manager.is_loaded:
             self._manager.load_base_model()
-        if route.adapter_key:
-            self._manager.load_adapter(route.adapter_key)
 
     def generate(
         self,
@@ -40,9 +38,11 @@ class HFBackend:
         top_p: float = 0.9,
         tenant_id: Optional[str] = None,
         model_type: Optional[str] = None,
+        adapter_key: Optional[str] = None,
     ) -> str:
         return self._manager.generate(
             messages,
+            adapter_key=adapter_key,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -56,9 +56,11 @@ class HFBackend:
         top_p: float = 0.9,
         tenant_id: Optional[str] = None,
         model_type: Optional[str] = None,
+        adapter_key: Optional[str] = None,
     ):
         return self._manager.generate_stream(
             messages,
+            adapter_key=adapter_key,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -72,9 +74,6 @@ class HFBackend:
         stats["backend"] = self.name
         return stats
 
-    def get_model_label(self, tenant_id: Optional[str], model_type: Optional[str], route) -> str:
-        return route.adapter_key or "base"
-
 
 class OllamaBackend:
     """Ollama HTTP backend for AMD-friendly local inference."""
@@ -84,12 +83,34 @@ class OllamaBackend:
     def __init__(self):
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
         self.timeout = float(os.getenv("OLLAMA_TIMEOUT_SEC", "120"))
+        self._warned_routes = set()
 
     def warmup(self):
         self._assert_available()
 
     def prepare_route(self, route):
-        # Route-specific model selection happens at request time.
+        resolved = self._resolve_model_name(route.tenant_id, route.model_type)
+        if route.adapter_key:
+            default_candidates = {
+                os.getenv("OLLAMA_MODEL_DEFAULT"),
+                os.getenv("OLLAMA_MODEL"),
+                "qwen2.5:1.5b",
+            }
+            if resolved in default_candidates:
+                warning_key = (route.tenant_id, route.model_type, route.adapter_key)
+                if warning_key not in self._warned_routes:
+                    logger.warning(
+                        "Ollama backend is serving '{}' for {}/{} while local adapter '{}' exists. "
+                        "Configure OLLAMA_MODEL_{}_{} or register a tenant-specific Ollama model "
+                        "to avoid bypassing PEFT adapters.",
+                        resolved,
+                        route.tenant_id,
+                        route.model_type,
+                        route.adapter_key,
+                        route.tenant_id.upper(),
+                        route.model_type.upper(),
+                    )
+                    self._warned_routes.add(warning_key)
         return None
 
     def generate(
@@ -100,6 +121,7 @@ class OllamaBackend:
         top_p: float = 0.9,
         tenant_id: Optional[str] = None,
         model_type: Optional[str] = None,
+        adapter_key: Optional[str] = None,
     ) -> str:
         model = self._resolve_model_name(tenant_id, model_type)
         payload = {
@@ -126,6 +148,7 @@ class OllamaBackend:
         top_p: float = 0.9,
         tenant_id: Optional[str] = None,
         model_type: Optional[str] = None,
+        adapter_key: Optional[str] = None,
     ) -> Iterable[str]:
         model = self._resolve_model_name(tenant_id, model_type)
         payload = {
@@ -138,20 +161,27 @@ class OllamaBackend:
                 "top_p": top_p,
             },
         }
-        with httpx.stream(
-            "POST",
-            f"{self.base_url}/api/chat",
-            json=payload,
-            timeout=self.timeout,
-        ) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                content = data.get("message", {}).get("content", "")
-                if content:
-                    yield content
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+                timeout=self.timeout,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError("Received malformed Ollama stream chunk") from exc
+                    content = data.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+        except Exception as exc:
+            logger.error(f"Ollama streaming request failed: {exc}")
+            raise RuntimeError("Ollama streaming request failed") from exc
 
     def get_stats(self) -> Dict:
         model_map = {}
@@ -165,6 +195,8 @@ class OllamaBackend:
         stats = {
             "backend": self.name,
             "base_loaded": self.is_available(),
+            "ready": self.is_available(),
+            "load_strategy": "remote",
             "active_adapter": None,
             "available_adapters": list(model_map.keys()),
             "load_count": 0,
@@ -241,3 +273,9 @@ def get_model_backend():
 
     logger.info(f"Selected inference backend: {_backend.name}")
     return _backend
+
+
+def reset_model_backend():
+    """Reset backend singleton for tests or runtime reconfiguration."""
+    global _backend
+    _backend = None

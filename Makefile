@@ -1,4 +1,4 @@
-.PHONY: setup mlflow data train dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env eval web mobile voice monitor test clean all
+.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env check-model-ready eval web mobile voice monitor test clean all
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -10,6 +10,19 @@ setup:
 	$(VENV)/bin/$(PIP) install --upgrade pip
 	$(VENV)/bin/$(PIP) install -r requirements.txt
 	@echo "Setup complete. Activate with: source $(VENV)/bin/activate"
+
+
+# ── AMD ROCm GPU Setup (RX 6800 XT / RDNA2 / gfx1030) ──────────────────────────
+setup-rocm:
+	@echo "Running ROCm setup for AMD RX 6800 XT (gfx1030/RDNA2)..."
+	bash setup_rocm.sh
+	@echo "IMPORTANT: Restart WSL after: run 'wsl --shutdown' in PowerShell"
+
+install-rocm-torch:
+	$(PIP) uninstall -y torch torchvision torchaudio 2>/dev/null || true
+	$(PIP) install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.1
+	@echo "Verifying GPU..."
+	$(PYTHON) -c "import torch; print('GPU:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
 
 # ── MLflow tracking server ──────────────────────────────────────────────────────
 mlflow:
@@ -29,11 +42,17 @@ index:
 
 # ── Training ───────────────────────────────────────────────────────────────────
 train:
-	$(PYTHON) training/sft_train.py --tenant sis
-	$(PYTHON) training/sft_train.py --tenant mfg
+	$(PYTHON) -m training.sft_train --tenant sis
+	$(PYTHON) -m training.sft_train --tenant mfg
+
+train-smoke:
+	$(PYTHON) -m training.sft_train --tenant sis --smoke-test
+
+train-smoke-tiny:
+	SMOKE_TEST_BASE_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0 $(PYTHON) -m training.sft_train --tenant sis --smoke-test
 
 dpo:
-	$(PYTHON) training/dpo_train.py --tenant sis
+	$(PYTHON) -m training.dpo_train --tenant sis
 
 # ── Inference server ───────────────────────────────────────────────────────────
 serve:
@@ -53,6 +72,9 @@ register-ollama-models:
 
 check-train-env:
 	$(PYTHON) -m training.check_env
+
+check-model-ready:
+	$(PYTHON) -m training.check_model --tenant sis --smoke-test
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 eval:

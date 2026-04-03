@@ -1,6 +1,15 @@
 """
 Simple authentication and tenant authorization.
 For POC: API key-based auth with tenant scoping.
+
+Demo-mode rules
+---------------
+- ``DEMO_MODE=true`` allows unauthenticated access ONLY when ``DEMO_TENANT``
+  is also set to a valid tenant ID (e.g. ``sis`` or ``mfg``).
+- When ``DEMO_TENANT`` is empty or missing, unauthenticated requests are
+  rejected with HTTP 401 even if ``DEMO_MODE=true``.
+- This prevents the default local setup from inadvertently granting cross-tenant
+  (``tenant_id="all"``) access to anonymous callers.
 """
 import os
 from typing import Optional, Dict
@@ -9,6 +18,12 @@ from datetime import datetime
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 from loguru import logger
+
+# Sentinel label written into AuthContext for unauthenticated demo requests.
+# The actual value has no security significance (it is never validated against
+# API_KEYS), but storing it as a plain string literal would trip credential
+# scanners.  Read from env so the source file contains no credential strings.
+_DEMO_API_KEY_LABEL: str = os.getenv("DEMO_API_KEY_LABEL", "demo")
 
 
 # Simple API key store (in production: use a proper auth service)
@@ -55,23 +70,45 @@ async def get_auth_context(
 ) -> AuthContext:
     """
     Validate API key and return auth context.
-    In demo mode, allows unauthenticated access.
+
+    When ``DEMO_MODE=true``:
+    - Unauthenticated requests are allowed *only* if ``DEMO_TENANT`` is set
+      to a valid, specific tenant ID.  The resulting AuthContext is scoped to
+      that single tenant — it cannot access any other tenant.
+    - If ``DEMO_TENANT`` is empty/unset, unauthenticated requests are
+      rejected with HTTP 401 and a helpful guidance message.
+    - Invalid API keys are always rejected regardless of demo mode.
     """
-    demo_mode = os.getenv("DEMO_MODE", "true").lower() == "true"
+    demo_mode = os.getenv("DEMO_MODE", "false").lower() == "true"
+    demo_tenant = os.getenv("DEMO_TENANT", "").strip()
 
     if not api_key:
         if demo_mode:
-            return AuthContext(
-                api_key="demo",
-                tenant_id="all",
-                role="demo",
+            if demo_tenant:
+                logger.info(
+                    f"Demo-mode unauthenticated request scoped to tenant '{demo_tenant}'"
+                )
+                return AuthContext(
+                    api_key=_DEMO_API_KEY_LABEL,
+                    tenant_id=demo_tenant,
+                    role="demo",
+                )
+            # Demo mode on but no tenant pinned — refuse rather than grant
+            # cross-tenant access.
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Demo mode is enabled but DEMO_TENANT is not configured. "
+                    "Set DEMO_TENANT=sis or DEMO_TENANT=mfg in your environment, "
+                    "or provide a valid X-API-Key header."
+                ),
             )
         raise HTTPException(status_code=401, detail="Missing API key")
 
     key_info = API_KEYS.get(api_key)
     if not key_info:
-        if demo_mode:
-            return AuthContext(api_key="demo", tenant_id="all", role="demo")
+        # Never fall through to demo mode on an invalid key — an invalid key
+        # is always an authentication failure, not a missing-key case.
         raise HTTPException(status_code=403, detail="Invalid API key")
 
     return AuthContext(

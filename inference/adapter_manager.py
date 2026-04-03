@@ -3,15 +3,16 @@ Adapter manager for multi-tenant model serving.
 Handles loading base model once and swapping LoRA adapters per tenant.
 """
 import os
-import json
-import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Dict, Optional, List
-from threading import Lock
+from threading import Condition, Lock
 
 import torch
 from loguru import logger
 from dotenv import load_dotenv
+
+from training.model_loader import get_gpu_memory_info, load_base_model_and_tokenizer
 
 load_dotenv()
 
@@ -29,54 +30,53 @@ class AdapterManager:
         self._active_adapter: Optional[str] = None
         self._available_adapters: Dict[str, Dict] = {}
         self._lock = Lock()
+        self._generation_state = Condition(self._lock)
+        self._active_generations = 0
         self._load_count = 0
         self._generation_count = 0
 
     def load_base_model(self):
-        """Load the base model and tokenizer (4-bit quantized)."""
+        """Load the base model and tokenizer using adaptive runtime settings.
+
+        The runtime (device, 4-bit quantization) is resolved automatically from
+        the environment via ``get_training_runtime_config()``. Set DEVICE and
+        USE_4BIT env vars to override the auto-detected behaviour.
+        """
         if self._base_loaded:
             logger.info("Base model already loaded")
             return
 
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-        model_path = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
         local_path = "./models/base/qwen2.5-1.5b-instruct"
+        # Build a minimal config understood by load_base_model_and_tokenizer.
+        # The "training" key below is required only because get_training_runtime_config
+        # reads config["training"]["optim"] to pick the optimizer; at inference time
+        # the optimizer is never actually used — only the device/dtype/bnb flags matter.
+        config = {
+            "model": {
+                "base_model": os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct"),
+                "local_path": local_path,
+                "torch_dtype": "float16",
+            },
+            "quantization": {
+                # load_in_4bit is advisory; can_use_bnb_4bit() will override it
+                # based on the USE_4BIT env var and bitsandbytes availability.
+                "load_in_4bit": True,
+                "bnb_4bit_compute_dtype": "float16",
+                "bnb_4bit_quant_type": "nf4",
+                "bnb_4bit_use_double_quant": True,
+            },
+            # Required by get_training_runtime_config for optimizer selection;
+            # the optimizer itself is unused during inference.
+            "training": {
+                "optim": "paged_adamw_8bit",
+            },
+        }
 
-        if Path(local_path).exists():
-            actual_path = local_path
-        else:
-            actual_path = model_path
-
-        logger.info(f"Loading base model: {actual_path}")
-
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-        )
-
-        self._model = AutoModelForCausalLM.from_pretrained(
-            actual_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            trust_remote_code=True,
-            token=os.getenv("HF_TOKEN"),
-            attn_implementation="eager",
+        self._model, self._tokenizer = load_base_model_and_tokenizer(
+            config,
+            for_training=False,
         )
         self._model.eval()
-
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            actual_path,
-            trust_remote_code=True,
-            token=os.getenv("HF_TOKEN"),
-        )
-        if self._tokenizer.pad_token is None:
-            self._tokenizer.pad_token = self._tokenizer.eos_token
-            self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
-        self._tokenizer.padding_side = "left"
 
         self._base_loaded = True
         self._scan_adapters()
@@ -110,16 +110,78 @@ class AdapterManager:
 
     def get_adapter_key(self, tenant_id: str, model_type: str = "sft") -> str:
         """Get the adapter key for a tenant and model type."""
+        if model_type == "base":
+            return ""
+
         key = f"{tenant_id}_{model_type}"
         if key not in self._available_adapters:
-            # Fallback: try other types
-            for fallback_type in ["sft", "dpo", "base"]:
+            # Fallback: try the other adapter-backed variants.
+            for fallback_type in ["sft", "dpo"]:
+                if fallback_type == model_type:
+                    continue
                 fallback_key = f"{tenant_id}_{fallback_type}"
                 if fallback_key in self._available_adapters:
                     logger.info(f"Adapter {key} not found, falling back to {fallback_key}")
                     return fallback_key
             return ""  # No adapter available
         return key
+
+    def _select_adapter_locked(self, adapter_key: Optional[str]) -> bool:
+        """
+        Select the adapter state that should be used for the next generation.
+
+        When switching between adapters or between adapter/base modes, wait for
+        any in-flight generations to finish so we never mutate model state under
+        an active decode.
+        """
+        desired_adapter = adapter_key or None
+        if desired_adapter == self._active_adapter:
+            return True
+
+        while self._active_generations > 0:
+            self._generation_state.wait()
+
+        if desired_adapter is None:
+            self._active_adapter = None
+            logger.info("Switched inference route to base model")
+            return True
+
+        if desired_adapter not in self._available_adapters:
+            logger.warning(f"Adapter not found: {desired_adapter}")
+            return False
+
+        adapter_info = self._available_adapters[desired_adapter]
+        adapter_path = adapter_info["path"]
+
+        try:
+            from peft import PeftModel
+
+            if hasattr(self._model, "peft_config"):
+                if desired_adapter not in self._model.peft_config:
+                    self._model.load_adapter(adapter_path, adapter_name=desired_adapter)
+                self._model.set_adapter(desired_adapter)
+            else:
+                self._model = PeftModel.from_pretrained(
+                    self._model,
+                    adapter_path,
+                    adapter_name=desired_adapter,
+                    is_trainable=False,
+                )
+
+            self._model.eval()
+            self._active_adapter = desired_adapter
+            adapter_info["loaded"] = True
+            self._load_count += 1
+
+            logger.info(f"Adapter hot-swapped: {desired_adapter}")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to hot-swap adapter '{desired_adapter}': {e}. "
+                f"Active adapter remains: {self._active_adapter}"
+            )
+            return False
 
     def load_adapter(self, adapter_key: str) -> bool:
         """Load a specific adapter onto the base model via hot-swap."""
@@ -131,52 +193,20 @@ class AdapterManager:
             return False
 
         with self._lock:
-            if self._active_adapter == adapter_key:
-                return True  # Already active — no-op
+            return self._select_adapter_locked(adapter_key)
 
-            adapter_info = self._available_adapters[adapter_key]
-            adapter_path = adapter_info["path"]
+    def use_base_model(self) -> bool:
+        """Select base-model inference even if PEFT adapters are loaded in memory."""
+        if not self._base_loaded:
+            self.load_base_model()
 
-            try:
-                from peft import PeftModel
-
-                if hasattr(self._model, 'peft_config'):
-                    # Model is already a PeftModel — use hot-swap API.
-                    # load_adapter registers the adapter weights under adapter_key;
-                    # set_adapter makes it the active one. This preserves all other
-                    # loaded adapters in memory without destroying the model object.
-                    if adapter_key not in self._model.peft_config:
-                        self._model.load_adapter(adapter_path, adapter_name=adapter_key)
-                    self._model.set_adapter(adapter_key)
-                else:
-                    # First adapter load: wrap the base model with PEFT.
-                    self._model = PeftModel.from_pretrained(
-                        self._model,
-                        adapter_path,
-                        adapter_name=adapter_key,
-                        is_trainable=False,
-                    )
-
-                self._model.eval()
-                self._active_adapter = adapter_key
-                adapter_info["loaded"] = True
-                self._load_count += 1
-
-                logger.info(f"Adapter hot-swapped: {adapter_key}")
-                return True
-
-            except Exception as e:
-                # Log but do NOT overwrite self._model — that would destroy
-                # any already-loaded adapters and break concurrent requests.
-                logger.error(
-                    f"Failed to hot-swap adapter '{adapter_key}': {e}. "
-                    f"Active adapter remains: {self._active_adapter}"
-                )
-                return False
+        with self._lock:
+            return self._select_adapter_locked(None)
 
     def generate(
         self,
         messages: List[Dict],
+        adapter_key: Optional[str] = None,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -187,6 +217,9 @@ class AdapterManager:
             self.load_base_model()
 
         with self._lock:
+            if not self._select_adapter_locked(adapter_key):
+                raise RuntimeError(f"Unable to activate adapter '{adapter_key}'")
+
             try:
                 prompt = self._tokenizer.apply_chat_template(
                     messages,
@@ -203,28 +236,41 @@ class AdapterManager:
                 max_length=2048 - max_new_tokens,
                 padding=True,
             ).to(self._model.device)
+            model = self._model
+            tokenizer = self._tokenizer
+            use_base_model = adapter_key in ("", None) and hasattr(model, "disable_adapter")
+            self._active_generations += 1
 
-            with torch.no_grad():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    temperature=max(temperature, 0.01),
-                    top_p=top_p,
-                    do_sample=do_sample,
-                    pad_token_id=self._tokenizer.pad_token_id,
-                    eos_token_id=self._tokenizer.eos_token_id,
-                )
+        try:
+            adapter_context = model.disable_adapter() if use_base_model else nullcontext()
+            with adapter_context:
+                with torch.inference_mode():
+                    outputs = model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=max(temperature, 0.01),
+                        top_p=top_p,
+                        do_sample=do_sample,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
+                    )
 
             input_length = inputs["input_ids"].shape[1]
             generated_ids = outputs[0][input_length:]
-            response = self._tokenizer.decode(generated_ids, skip_special_tokens=True)
+            response = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
-            self._generation_count += 1
+            with self._lock:
+                self._generation_count += 1
             return response.strip()
+        finally:
+            with self._lock:
+                self._active_generations -= 1
+                self._generation_state.notify_all()
 
     def generate_stream(
         self,
         messages: List[Dict],
+        adapter_key: Optional[str] = None,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -239,6 +285,9 @@ class AdapterManager:
         # Acquire lock only for tokenization + thread setup, then release
         # before yielding tokens so concurrent generate() calls are not blocked.
         with self._lock:
+            if not self._select_adapter_locked(adapter_key):
+                raise RuntimeError(f"Unable to activate adapter '{adapter_key}'")
+
             try:
                 prompt = self._tokenizer.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True,
@@ -253,9 +302,12 @@ class AdapterManager:
                 max_length=2048 - max_new_tokens,
                 padding=True,
             ).to(self._model.device)
+            model = self._model
+            tokenizer = self._tokenizer
+            use_base_model = adapter_key in ("", None) and hasattr(model, "disable_adapter")
 
             streamer = TextIteratorStreamer(
-                self._tokenizer,
+                tokenizer,
                 skip_prompt=True,
                 skip_special_tokens=True,
             )
@@ -266,20 +318,31 @@ class AdapterManager:
                 "temperature": max(temperature, 0.01),
                 "top_p": top_p,
                 "do_sample": True,
-                "pad_token_id": self._tokenizer.pad_token_id,
-                "eos_token_id": self._tokenizer.eos_token_id,
+                "pad_token_id": tokenizer.pad_token_id,
+                "eos_token_id": tokenizer.eos_token_id,
                 "streamer": streamer,
             }
 
-            thread = Thread(target=self._model.generate, kwargs=generation_kwargs)
+            def _run_generation():
+                adapter_context = model.disable_adapter() if use_base_model else nullcontext()
+                with adapter_context:
+                    with torch.inference_mode():
+                        model.generate(**generation_kwargs)
+
+            thread = Thread(target=_run_generation)
             thread.start()
+            self._active_generations += 1
             self._generation_count += 1
         # Lock released here — token iteration happens without holding it
 
-        for token in streamer:
-            yield token
-
-        thread.join()
+        try:
+            for token in streamer:
+                yield token
+            thread.join()
+        finally:
+            with self._lock:
+                self._active_generations -= 1
+                self._generation_state.notify_all()
 
 
     def _format_messages_fallback(self, messages: List[Dict]) -> str:
@@ -305,22 +368,24 @@ class AdapterManager:
         return self._available_adapters
 
     def get_stats(self) -> Dict:
+        local_path = Path("./models/base/qwen2.5-1.5b-instruct")
+        local_model_ready = local_path.exists() and any(local_path.iterdir())
+        configured_source = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
         return {
             "base_loaded": self._base_loaded,
             "active_adapter": self._active_adapter,
             "available_adapters": list(self._available_adapters.keys()),
             "load_count": self._load_count,
             "generation_count": self._generation_count,
+            "active_generations": self._active_generations,
             "gpu_memory": self._get_gpu_memory(),
+            "ready": self._base_loaded or local_model_ready or bool(configured_source),
+            "load_strategy": "lazy",
+            "model_source": str(local_path) if local_model_ready else configured_source,
         }
 
     def _get_gpu_memory(self) -> Dict:
-        if torch.cuda.is_available():
-            return {
-                "allocated_gb": round(torch.cuda.memory_allocated() / 1024**3, 2),
-                "reserved_gb": round(torch.cuda.memory_reserved() / 1024**3, 2),
-            }
-        return {"available": False}
+        return get_gpu_memory_info()
 
 
 # Global singleton

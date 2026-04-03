@@ -1,10 +1,20 @@
 """
 Build Supervised Fine-Tuning (SFT) datasets from tenant documents.
 Generates instruction-response pairs in chat format for TRL SFTTrainer.
+
+Grounding strategy
+------------------
+When ingested / redacted / chunked documents exist (``chunks_dir/chunks.json``
+or ``processed_dir/redacted_documents.json`` → ``ingested_documents.json``),
+they are converted into instruction-response pairs that are **merged** with the
+hardcoded seed examples below.  The seed examples are always included so that
+CI / smoke tests work even with an empty document corpus.  Corpus-derived
+examples are added on top (up to TARGET_CORPUS_RATIO of the final dataset).
 """
 import json
 import random
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Optional
 from loguru import logger
 
 from tenant_data_pipeline.config import TENANTS
@@ -87,6 +97,203 @@ MFG_SFT_EXAMPLES = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Corpus-to-SFT conversion helpers
+# ---------------------------------------------------------------------------
+
+# Fraction of the final dataset that should come from the live corpus
+# (when chunks are available).  The rest is filled from seed examples.
+TARGET_CORPUS_RATIO = 0.60
+
+# Instruction templates keyed by topic — used when converting raw chunks into
+# SFT instruction/output pairs.  Each template receives the chunk content via
+# .format(content=…).
+_TOPIC_INSTRUCTION_TEMPLATES: Dict[str, List[str]] = {
+    # SIS topics
+    "enrollment": [
+        "Explain the enrollment process described in the following policy excerpt.",
+        "Summarise the key enrollment requirements found in this document section.",
+        "A new staff member asks about enrollment procedures. Based on the policy below, what should they know?",
+    ],
+    "attendance": [
+        "Describe the attendance rules and procedures outlined in this policy section.",
+        "What are the key attendance requirements described in this document?",
+        "Summarise the attendance tracking policy from the excerpt below.",
+    ],
+    "grading": [
+        "Explain the grading policy described in this section.",
+        "What grading rules and procedures does this policy excerpt define?",
+        "A teacher needs to understand the grading policy. Summarise the key points from this excerpt.",
+    ],
+    "ferpa_compliance": [
+        "What FERPA compliance obligations are described in this policy section?",
+        "Explain the privacy and data-protection requirements outlined below.",
+        "Summarise the FERPA-related rules from this policy excerpt.",
+    ],
+    "transcripts": [
+        "What are the transcript request and retention policies described here?",
+        "Explain the transcript release procedures outlined in this section.",
+    ],
+    "accommodations": [
+        "Describe the accommodation and IEP-related procedures in this policy excerpt.",
+        "What steps must be followed for student accommodations according to this section?",
+    ],
+    "disciplinary": [
+        "What disciplinary procedures are described in this policy section?",
+        "Explain the progressive discipline process outlined below.",
+    ],
+    "parent_communication": [
+        "What are the parent communication requirements described in this excerpt?",
+        "Summarise the parent notification and verification rules from this policy section.",
+    ],
+    "transfer": [
+        "Describe the transfer process and requirements outlined in this policy section.",
+        "Explain how student transfers are handled according to this excerpt.",
+    ],
+    "records_management": [
+        "What are the student records management and retention rules in this section?",
+        "Describe the role-based access and records handling policies described below.",
+    ],
+    # MFG topics
+    "standard_operating_procedures": [
+        "Describe the standard operating procedures outlined in this section.",
+        "What steps must operators follow according to this SOP excerpt?",
+        "Summarise the key operational requirements from this procedure document.",
+    ],
+    "quality_control": [
+        "What quality control requirements are described in this section?",
+        "Explain the inspection and quality assurance procedures outlined below.",
+    ],
+    "capa": [
+        "Describe the CAPA process outlined in this policy section.",
+        "What corrective and preventive action steps are required according to this excerpt?",
+    ],
+    "safety_protocols": [
+        "What safety protocols and requirements are described in this section?",
+        "Explain the safety rules and emergency procedures outlined below.",
+        "An operator asks about safety requirements. Based on this excerpt, what must they follow?",
+    ],
+    "maintenance": [
+        "Describe the maintenance schedule and procedures in this section.",
+        "What maintenance requirements are outlined in this policy excerpt?",
+    ],
+    "production_scheduling": [
+        "Explain the production scheduling process described in this section.",
+        "What scheduling rules and responsibilities are defined in this excerpt?",
+    ],
+    "regulatory_compliance": [
+        "What regulatory compliance requirements are described in this section?",
+        "Summarise the compliance obligations outlined in this policy excerpt.",
+    ],
+    "defect_classification": [
+        "Describe the defect classification system outlined in this section.",
+        "What are the defect severity levels and their escalation paths according to this excerpt?",
+    ],
+    "inventory_management": [
+        "What inventory management procedures are described in this policy section?",
+        "Explain the inventory tracking and cycle count requirements outlined below.",
+    ],
+    "iso_documentation": [
+        "Describe the ISO documentation and audit requirements in this section.",
+        "What document control and risk management rules are defined in this excerpt?",
+    ],
+    # Generic fallback
+    "general": [
+        "Summarise the key information in this policy or procedure excerpt.",
+        "What are the main points described in the following document section?",
+        "Explain the procedures and requirements outlined in this excerpt.",
+    ],
+}
+
+
+def _pick_instruction(topic: str) -> str:
+    """Pick a random instruction template for the given topic."""
+    templates = _TOPIC_INSTRUCTION_TEMPLATES.get(
+        topic, _TOPIC_INSTRUCTION_TEMPLATES["general"]
+    )
+    return random.choice(templates)
+
+
+def _load_chunks(tenant_id: str) -> List[Dict]:
+    """
+    Load processed document chunks for a tenant.
+
+    Lookup order:
+    1. ``chunks_dir/chunks.json``  (preferred — post-chunker output)
+    2. ``processed_dir/redacted_documents.json``  (post-PII redaction)
+    3. ``processed_dir/ingested_documents.json``  (raw ingest output)
+
+    Returns a list of chunk dicts (each with at least ``content`` and
+    ``topic`` keys).  Returns an empty list if no processed data exists yet.
+    """
+    config = TENANTS[tenant_id]
+    candidates = [
+        config.chunks_dir / "chunks.json",
+        config.processed_dir / "redacted_documents.json",
+        config.processed_dir / "ingested_documents.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data:
+                    logger.info(
+                        f"[{tenant_id}] SFT builder: loaded {len(data)} items "
+                        f"from {path.name}"
+                    )
+                    return data
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[{tenant_id}] Could not parse {path}: {exc}"
+                )
+    logger.info(
+        f"[{tenant_id}] SFT builder: no corpus data found, using seed examples only."
+    )
+    return []
+
+
+def _chunks_to_sft_examples(chunks: List[Dict], tenant_id: str) -> List[Dict]:
+    """
+    Convert ingested / chunked document records into SFT instruction-response
+    pairs.
+
+    Each chunk becomes one example:
+    - ``instruction`` — a topic-appropriate question drawn from the template
+      library above, followed by the chunk text as inline context.
+    - ``output``      — a grounded summary / explanation derived directly from
+      the chunk content (the chunk IS the ground-truth content).
+    - ``topic``       — preserved from the source chunk.
+    - ``source``      — ``"corpus"`` so downstream analysis can distinguish
+      corpus-derived from seed examples.
+
+    Chunks shorter than 80 characters are skipped (likely headings or stubs).
+    """
+    examples: List[Dict] = []
+    for item in chunks:
+        content = item.get("content_redacted") or item.get("content", "")
+        if not content or len(content.strip()) < 80:
+            continue
+        topic = item.get("topic", "general")
+        instruction_stem = _pick_instruction(topic)
+        instruction = (
+            f"{instruction_stem}\n\nDocument excerpt:\n{content.strip()}"
+        )
+        # The output IS the content itself, framed as a grounded answer.
+        # This teaches the model to produce answers grounded in the corpus.
+        output = (
+            f"Based on the policy documentation:\n\n{content.strip()}"
+        )
+        examples.append({
+            "instruction": instruction,
+            "input": "",
+            "output": output,
+            "topic": topic,
+            "source": "corpus",
+            "doc_id": item.get("doc_id") or item.get("chunk_id", ""),
+        })
+    return examples
+
+
 def augment_examples(examples: List[Dict], multiplier: int = 2) -> List[Dict]:
     """Create variations by rephrasing instructions."""
     prefixes = [
@@ -140,27 +347,64 @@ def _to_chat_format(example: Dict) -> Dict:
 
 
 def build_sft_dataset(tenant_id: str) -> List[Dict]:
-    """Build SFT dataset for a tenant."""
+    """
+    Build SFT dataset for a tenant.
+
+    The final dataset is a blend of:
+    - **Corpus examples**: instruction-response pairs derived from the tenant's
+      own processed / chunked documents (up to TARGET_CORPUS_RATIO of the
+      total).  These ground the model in the *actual* document content.
+    - **Seed examples**: the hardcoded domain-expert pairs defined above.
+      These are always included so the dataset is never empty, and they cover
+      alignment edge-cases that are hard to derive automatically.
+    """
     config = TENANTS[tenant_id]
     config.sft_dir.mkdir(parents=True, exist_ok=True)
-
-    examples = SIS_SFT_EXAMPLES if tenant_id == "sis" else MFG_SFT_EXAMPLES
-
-    target_count = 120
-    multiplier = max(2, (target_count // len(examples)) + 1)
-    augmented = augment_examples(examples, multiplier=multiplier)[:target_count]
-
     system_prompt = _get_system_prompt(tenant_id)
-    formatted = []
-    for ex in augmented:
-        formatted.append({
+
+    # ---- 1. Load corpus chunks and convert to SFT examples ----
+    chunks = _load_chunks(tenant_id)
+    corpus_examples = _chunks_to_sft_examples(chunks, tenant_id)
+    random.shuffle(corpus_examples)
+
+    # ---- 2. Prepare seed examples ----
+    seed_raw = SIS_SFT_EXAMPLES if tenant_id == "sis" else MFG_SFT_EXAMPLES
+
+    target_count = max(120, len(corpus_examples) + len(seed_raw))
+
+    # How many corpus slots do we want?
+    corpus_target = int(target_count * TARGET_CORPUS_RATIO)
+    # How many seed slots fill the rest?
+    seed_target = target_count - corpus_target
+
+    # Augment seed examples to reach seed_target
+    seed_multiplier = max(2, (seed_target // max(len(seed_raw), 1)) + 1)
+    augmented_seed = augment_examples(seed_raw, multiplier=seed_multiplier)[:seed_target]
+
+    # Trim corpus to what we need
+    corpus_trimmed = corpus_examples[:corpus_target]
+
+    logger.info(
+        f"[{tenant_id}] SFT mix: {len(corpus_trimmed)} corpus-derived + "
+        f"{len(augmented_seed)} seed examples "
+        f"(corpus ratio {len(corpus_trimmed) / max(len(corpus_trimmed) + len(augmented_seed), 1):.1%})"
+    )
+
+    # ---- 3. Merge, format, shuffle, split ----
+    all_examples = corpus_trimmed + augmented_seed
+
+    formatted = [
+        {
             "system": system_prompt,
             "instruction": ex["instruction"],
             "input": ex.get("input", ""),
             "output": ex["output"],
             "topic": ex["topic"],
             "tenant_id": tenant_id,
-        })
+            "source": ex.get("source", "seed"),
+        }
+        for ex in all_examples
+    ]
 
     random.seed(42)
     random.shuffle(formatted)
@@ -176,16 +420,14 @@ def build_sft_dataset(tenant_id: str) -> List[Dict]:
     (config.sft_dir / "train_chat.json").write_text(json.dumps(chat_train, indent=2), encoding="utf-8")
     (config.sft_dir / "eval_chat.json").write_text(json.dumps(chat_eval, indent=2), encoding="utf-8")
 
-    logger.info(f"[{tenant_id}] SFT dataset: {len(train_set)} train, {len(eval_set)} eval")
+    logger.info(
+        f"[{tenant_id}] SFT dataset written: {len(train_set)} train, {len(eval_set)} eval"
+    )
     return formatted
 
 
 def build_all_sft_datasets() -> Dict:
-    results = {}
-    for tenant_id in TENANTS:
-        dataset = build_sft_dataset(tenant_id)
-        results[tenant_id] = len(dataset)
-    return results
+    return {tenant_id: len(build_sft_dataset(tenant_id)) for tenant_id in TENANTS}
 
 
 if __name__ == "__main__":

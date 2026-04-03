@@ -8,6 +8,7 @@ Usage:
     python training/dpo_train.py --tenant sis
     python training/dpo_train.py --tenant mfg
     python training/dpo_train.py --tenant sis --sft-adapter ./models/adapters/sis/sft
+    python training/dpo_train.py --tenant sis --full-reference
 """
 import os
 import sys
@@ -23,12 +24,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from training.config_loader import get_dpo_config, get_sft_config
+from training.config_loader import get_dpo_config, get_sft_config, deep_merge
 from training.model_loader import (
     load_base_model_and_tokenizer,
     setup_lora,
     get_gpu_memory_info,
     get_training_runtime_config,
+    resolve_model_source,
 )
 from training.data_loader import load_dpo_dataset
 from training.mlflow_utils import ExperimentTracker, ModelRegistry
@@ -63,7 +65,7 @@ def train_dpo(
         "training": dpo_config.get("training", {}),
     }
     if config_override:
-        config.update(config_override)
+        config = deep_merge(config, config_override)
 
     train_cfg = config["training"]
     model_cfg = config["model"]
@@ -159,6 +161,15 @@ def train_dpo(
         logger.info(f"DPO dataset: {len(train_dataset)} train, {len(eval_dataset)} eval")
 
         # ---- Load reference model ----
+        # DPO requires a frozen reference model alongside the policy model.
+        # This doubles peak GPU/CPU memory usage.  Warn early if headroom is low.
+        mem_info = get_gpu_memory_info()
+        if mem_info.get("available") and mem_info.get("free_gb", 999) < 4.0:
+            logger.warning(
+                f"Low GPU memory ({mem_info['free_gb']:.1f} GB free) before loading "
+                "reference model. DPO requires two model copies and may OOM. "
+                "Consider using --smoke-test with a tiny model or reducing batch size."
+            )
         logger.info("Loading reference model for DPO...")
         ref_model, _ = load_base_model_and_tokenizer(config, for_training=False)
         if sft_adapter_path:
@@ -324,6 +335,19 @@ def main():
         "--beta", type=float, default=None,
         help="Override DPO beta",
     )
+    parser.add_argument(
+        "--full-reference",
+        action="store_true",
+        help="Use the heavier explicit reference-model DPO path instead of the default simple mode",
+    )
+    parser.add_argument(
+        "--smoke-test", action="store_true",
+        help="Run a tiny smoke-test DPO job with truncated datasets (CPU-safe)",
+    )
+    parser.add_argument(
+        "--max-steps", type=int, default=None,
+        help="Override max training steps",
+    )
     args = parser.parse_args()
 
     overrides = {}
@@ -331,12 +355,38 @@ def main():
         overrides.setdefault("training", {})["num_train_epochs"] = args.epochs
     if args.beta:
         overrides.setdefault("dpo", {})["beta"] = args.beta
+    if args.max_steps is not None:
+        overrides.setdefault("training", {})["max_steps"] = args.max_steps
+    if args.smoke_test:
+        max_steps = args.max_steps or 2
+        overrides.setdefault("training", {})["num_train_epochs"] = 1
+        overrides.setdefault("training", {})["max_steps"] = max_steps
+        overrides.setdefault("training", {})["per_device_train_batch_size"] = 1
+        overrides.setdefault("training", {})["per_device_eval_batch_size"] = 1
+        overrides.setdefault("training", {})["gradient_accumulation_steps"] = 1
+        overrides.setdefault("training", {})["logging_steps"] = 1
+        overrides.setdefault("training", {})["save_total_limit"] = 1
+        overrides["smoke_test"] = {
+            "enabled": True,
+            "train_samples": 8,
+            "eval_samples": 4,
+        }
 
-    result = train_dpo(
-        args.tenant,
-        sft_adapter_path=args.sft_adapter,
-        config_override=overrides if overrides else None,
-    )
+    if args.full_reference:
+        result = train_dpo(
+            args.tenant,
+            sft_adapter_path=args.sft_adapter,
+            config_override=overrides if overrides else None,
+        )
+    else:
+        from training.dpo_train_simple import train_dpo_simple
+
+        logger.info("Using simplified DPO path by default to avoid reference-model OOMs")
+        result = train_dpo_simple(
+            args.tenant,
+            sft_adapter_path=args.sft_adapter,
+            config_override=overrides if overrides else None,
+        )
     print(f"\nResult: {json.dumps(result, indent=2, default=str)}")
 
 

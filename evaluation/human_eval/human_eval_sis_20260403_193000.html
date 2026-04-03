@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Human Evaluation — SIS</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+        .eval-item { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .question, .response, .reference { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 4px; }
+        .dimension { margin: 5px 0; }
+        .flags label { margin-right: 15px; }
+        textarea { width: 100%; }
+        h3 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Human Evaluation Form — SIS</h1>
+    <p>Form ID: human_eval_sis_20260403_193000</p>
+    <p>Evaluator: <input type="text" name="evaluator_name" placeholder="Your name"></p>
+    <p>Role: <input type="text" name="evaluator_role" placeholder="Your role"></p>
+    <form method="post">
+        
+        <div class="eval-item">
+            <h3>Qsis_001: enrollment</h3>
+            <div class="question"><strong>Question:</strong> What documents are required for a new student to enroll?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Students must provide proof of residency, immunization records, and a birth certificate. Transfer students must also submit official transcripts from their previous institution.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_001_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_001_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_001_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_001_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_001_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_001_completeness" value="1"> 1</label> <label><input type="radio" name="sis_001_completeness" value="2"> 2</label> <label><input type="radio" name="sis_001_completeness" value="3"> 3</label> <label><input type="radio" name="sis_001_completeness" value="4"> 4</label> <label><input type="radio" name="sis_001_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_001_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_001_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_001_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_001_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_001_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_001_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_001_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_001_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_001_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_001_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_001_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_001_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_001_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_001_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_001_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_001_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_001_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_001_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_001_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_001_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_001_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_001_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_001_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_001_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_001_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_001_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_001_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_002: enrollment</h3>
+            <div class="question"><strong>Question:</strong> Can enrollment be denied to a homeless student who lacks documentation?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>No. Under the McKinney-Vento Act, enrollment cannot be denied due to lack of a fixed address. The student must be enrolled immediately.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_002_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_002_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_002_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_002_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_002_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_002_completeness" value="1"> 1</label> <label><input type="radio" name="sis_002_completeness" value="2"> 2</label> <label><input type="radio" name="sis_002_completeness" value="3"> 3</label> <label><input type="radio" name="sis_002_completeness" value="4"> 4</label> <label><input type="radio" name="sis_002_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_002_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_002_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_002_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_002_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_002_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_002_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_002_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_002_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_002_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_002_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_002_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_002_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_002_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_002_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_002_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_002_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_002_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_002_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_002_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_002_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_002_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_002_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_002_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_002_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_002_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_002_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_002_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_003: attendance</h3>
+            <div class="question"><strong>Question:</strong> What happens after a student accumulates 10 unexcused absences?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>After 10 unexcused absences, an attendance intervention team meeting is convened. This follows earlier interventions: automated letter at 3 absences, counselor contact at 5 absences.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_003_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_003_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_003_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_003_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_003_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_003_completeness" value="1"> 1</label> <label><input type="radio" name="sis_003_completeness" value="2"> 2</label> <label><input type="radio" name="sis_003_completeness" value="3"> 3</label> <label><input type="radio" name="sis_003_completeness" value="4"> 4</label> <label><input type="radio" name="sis_003_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_003_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_003_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_003_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_003_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_003_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_003_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_003_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_003_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_003_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_003_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_003_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_003_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_003_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_003_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_003_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_003_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_003_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_003_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_003_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_003_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_003_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_003_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_003_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_003_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_003_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_003_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_003_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_004: attendance</h3>
+            <div class="question"><strong>Question:</strong> How long must teachers wait before recording attendance?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Teachers must record attendance in the SIS within the first 15 minutes of each class period.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_004_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_004_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_004_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_004_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_004_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_004_completeness" value="1"> 1</label> <label><input type="radio" name="sis_004_completeness" value="2"> 2</label> <label><input type="radio" name="sis_004_completeness" value="3"> 3</label> <label><input type="radio" name="sis_004_completeness" value="4"> 4</label> <label><input type="radio" name="sis_004_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_004_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_004_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_004_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_004_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_004_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_004_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_004_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_004_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_004_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_004_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_004_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_004_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_004_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_004_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_004_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_004_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_004_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_004_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_004_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_004_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_004_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_004_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_004_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_004_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_004_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_004_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_004_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_005: grading</h3>
+            <div class="question"><strong>Question:</strong> What is the GPA weight bonus for AP courses?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Honors and AP courses receive a 0.5 GPA weight bonus.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_005_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_005_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_005_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_005_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_005_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_005_completeness" value="1"> 1</label> <label><input type="radio" name="sis_005_completeness" value="2"> 2</label> <label><input type="radio" name="sis_005_completeness" value="3"> 3</label> <label><input type="radio" name="sis_005_completeness" value="4"> 4</label> <label><input type="radio" name="sis_005_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_005_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_005_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_005_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_005_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_005_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_005_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_005_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_005_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_005_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_005_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_005_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_005_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_005_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_005_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_005_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_005_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_005_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_005_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_005_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_005_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_005_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_005_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_005_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_005_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_005_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_005_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_005_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_006: grading</h3>
+            <div class="question"><strong>Question:</strong> What happens to an incomplete grade that is not resolved?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Incomplete grades must be resolved within 10 school days of the quarter end. Unresolved incompletes are automatically converted to F by the SIS.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_006_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_006_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_006_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_006_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_006_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_006_completeness" value="1"> 1</label> <label><input type="radio" name="sis_006_completeness" value="2"> 2</label> <label><input type="radio" name="sis_006_completeness" value="3"> 3</label> <label><input type="radio" name="sis_006_completeness" value="4"> 4</label> <label><input type="radio" name="sis_006_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_006_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_006_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_006_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_006_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_006_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_006_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_006_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_006_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_006_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_006_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_006_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_006_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_006_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_006_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_006_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_006_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_006_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_006_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_006_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_006_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_006_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_006_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_006_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_006_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_006_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_006_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_006_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_007: ferpa</h3>
+            <div class="question"><strong>Question:</strong> Who can access student education records without consent under FERPA?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Records may be disclosed without consent to school officials with legitimate educational interest, schools to which a student transfers, officials for audit purposes, in connection with financial aid, organizations conducting studies, accrediting organizations, to comply with judicial orders, and in health and safety emergencies.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_007_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_007_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_007_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_007_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_007_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_007_completeness" value="1"> 1</label> <label><input type="radio" name="sis_007_completeness" value="2"> 2</label> <label><input type="radio" name="sis_007_completeness" value="3"> 3</label> <label><input type="radio" name="sis_007_completeness" value="4"> 4</label> <label><input type="radio" name="sis_007_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_007_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_007_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_007_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_007_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_007_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_007_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_007_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_007_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_007_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_007_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_007_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_007_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_007_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_007_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_007_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_007_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_007_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_007_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_007_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_007_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_007_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_007_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_007_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_007_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_007_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_007_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_007_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_008: ferpa</h3>
+            <div class="question"><strong>Question:</strong> What SIS security controls are required for FERPA compliance?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The SIS must enforce role-based access control at field level, maintain audit logging of all record access and modifications, encrypt data at rest and in transit, require annual FERPA training for all users, and mandate breach notification within 72 hours.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_008_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_008_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_008_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_008_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_008_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_008_completeness" value="1"> 1</label> <label><input type="radio" name="sis_008_completeness" value="2"> 2</label> <label><input type="radio" name="sis_008_completeness" value="3"> 3</label> <label><input type="radio" name="sis_008_completeness" value="4"> 4</label> <label><input type="radio" name="sis_008_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_008_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_008_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_008_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_008_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_008_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_008_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_008_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_008_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_008_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_008_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_008_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_008_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_008_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_008_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_008_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_008_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_008_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_008_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_008_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_008_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_008_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_008_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_008_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_008_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_008_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_008_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_008_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_009: transcripts</h3>
+            <div class="question"><strong>Question:</strong> How long does it take to process a transcript request for alumni?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Alumni transcript requests are processed within 5 business days. The fee is $5 per official transcript.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_009_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_009_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_009_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_009_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_009_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_009_completeness" value="1"> 1</label> <label><input type="radio" name="sis_009_completeness" value="2"> 2</label> <label><input type="radio" name="sis_009_completeness" value="3"> 3</label> <label><input type="radio" name="sis_009_completeness" value="4"> 4</label> <label><input type="radio" name="sis_009_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_009_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_009_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_009_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_009_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_009_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_009_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_009_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_009_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_009_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_009_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_009_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_009_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_009_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_009_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_009_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_009_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_009_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_009_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_009_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_009_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_009_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_009_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_009_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_009_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_009_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_009_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_009_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_010: accommodations</h3>
+            <div class="question"><strong>Question:</strong> Within what timeframe must the initial evaluation for student accommodations be completed?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The initial evaluation must be completed within 60 calendar days of receiving parental consent.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_010_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_010_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_010_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_010_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_010_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_010_completeness" value="1"> 1</label> <label><input type="radio" name="sis_010_completeness" value="2"> 2</label> <label><input type="radio" name="sis_010_completeness" value="3"> 3</label> <label><input type="radio" name="sis_010_completeness" value="4"> 4</label> <label><input type="radio" name="sis_010_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_010_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_010_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_010_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_010_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_010_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_010_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_010_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_010_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_010_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_010_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_010_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_010_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_010_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_010_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_010_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_010_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_010_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_010_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_010_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_010_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_010_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_010_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_010_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_010_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_010_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_010_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_010_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_011: discipline</h3>
+            <div class="question"><strong>Question:</strong> What protections exist for special education students facing suspension?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>A manifestation determination is required before suspending a special education student beyond 10 cumulative days. The IEP team must convene within 10 school days. Students cannot be expelled for behavior that is a manifestation of their disability.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_011_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_011_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_011_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_011_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_011_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_011_completeness" value="1"> 1</label> <label><input type="radio" name="sis_011_completeness" value="2"> 2</label> <label><input type="radio" name="sis_011_completeness" value="3"> 3</label> <label><input type="radio" name="sis_011_completeness" value="4"> 4</label> <label><input type="radio" name="sis_011_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_011_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_011_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_011_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_011_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_011_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_011_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_011_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_011_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_011_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_011_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_011_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_011_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_011_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_011_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_011_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_011_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_011_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_011_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_011_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_011_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_011_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_011_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_011_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_011_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_011_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_011_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_011_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_012: transfers</h3>
+            <div class="question"><strong>Question:</strong> How are grades calculated for a student who transfers mid-year?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Proportional grade calculation is applied for courses in progress. The sending school provides the current grade and attendance to date. The receiving teacher incorporates the proportional grade into the final calculation.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_012_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_012_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_012_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_012_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_012_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_012_completeness" value="1"> 1</label> <label><input type="radio" name="sis_012_completeness" value="2"> 2</label> <label><input type="radio" name="sis_012_completeness" value="3"> 3</label> <label><input type="radio" name="sis_012_completeness" value="4"> 4</label> <label><input type="radio" name="sis_012_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_012_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_012_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_012_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_012_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_012_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_012_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_012_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_012_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_012_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_012_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_012_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_012_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_012_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_012_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_012_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_012_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_012_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_012_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_012_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_012_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_012_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_012_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_012_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_012_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_012_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_012_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_012_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_013: records</h3>
+            <div class="question"><strong>Question:</strong> What access level do school nurses have in the SIS?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Nurses can access health records only. They do not have access to academic records, grades, or other student information.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_013_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_013_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_013_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_013_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_013_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_013_completeness" value="1"> 1</label> <label><input type="radio" name="sis_013_completeness" value="2"> 2</label> <label><input type="radio" name="sis_013_completeness" value="3"> 3</label> <label><input type="radio" name="sis_013_completeness" value="4"> 4</label> <label><input type="radio" name="sis_013_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_013_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_013_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_013_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_013_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_013_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_013_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_013_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_013_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_013_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_013_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_013_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_013_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_013_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_013_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_013_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_013_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_013_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_013_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_013_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_013_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_013_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_013_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_013_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_013_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_013_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_013_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_013_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_014: parent_communication</h3>
+            <div class="question"><strong>Question:</strong> Do non-custodial parents retain rights to access student records?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Yes, non-custodial parents retain FERPA rights to access student records unless a court order specifically restricts that access.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_014_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_014_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_014_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_014_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_014_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_014_completeness" value="1"> 1</label> <label><input type="radio" name="sis_014_completeness" value="2"> 2</label> <label><input type="radio" name="sis_014_completeness" value="3"> 3</label> <label><input type="radio" name="sis_014_completeness" value="4"> 4</label> <label><input type="radio" name="sis_014_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_014_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_014_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_014_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_014_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_014_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_014_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_014_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_014_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_014_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_014_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_014_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_014_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_014_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_014_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_014_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_014_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_014_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_014_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_014_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_014_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_014_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_014_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_014_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_014_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_014_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_014_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_014_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_015: records</h3>
+            <div class="question"><strong>Question:</strong> How long are temporary student records retained after a student exits the district?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Temporary records are destroyed 5 years after the student exits the district. Permanent records are maintained indefinitely.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_015_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_015_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_015_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_015_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_015_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_015_completeness" value="1"> 1</label> <label><input type="radio" name="sis_015_completeness" value="2"> 2</label> <label><input type="radio" name="sis_015_completeness" value="3"> 3</label> <label><input type="radio" name="sis_015_completeness" value="4"> 4</label> <label><input type="radio" name="sis_015_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_015_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_015_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_015_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_015_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_015_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_015_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_015_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_015_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_015_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_015_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_015_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_015_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_015_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_015_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_015_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_015_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_015_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_015_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_015_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_015_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_015_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_015_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_015_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_015_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_015_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_015_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_015_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_016: cross_domain</h3>
+            <div class="question"><strong>Question:</strong> What is the procedure for handling a critical quality defect on the assembly line?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>I don't have information about manufacturing or assembly line procedures. My knowledge covers student information system policies for District 42. Please direct manufacturing questions to the appropriate system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_016_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_016_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_016_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_016_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_016_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_016_completeness" value="1"> 1</label> <label><input type="radio" name="sis_016_completeness" value="2"> 2</label> <label><input type="radio" name="sis_016_completeness" value="3"> 3</label> <label><input type="radio" name="sis_016_completeness" value="4"> 4</label> <label><input type="radio" name="sis_016_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_016_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_016_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_016_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_016_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_016_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_016_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_016_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_016_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_016_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_016_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_016_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_016_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_016_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_016_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_016_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_016_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_016_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_016_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_016_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_016_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_016_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_016_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_016_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_016_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_016_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_016_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_016_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_017: cross_domain</h3>
+            <div class="question"><strong>Question:</strong> What is the CAPA process for ISO compliance?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>I don't have information about CAPA processes or ISO compliance. My expertise covers student information system policies. Please consult the appropriate manufacturing or quality system.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_017_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_017_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_017_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_017_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_017_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_017_completeness" value="1"> 1</label> <label><input type="radio" name="sis_017_completeness" value="2"> 2</label> <label><input type="radio" name="sis_017_completeness" value="3"> 3</label> <label><input type="radio" name="sis_017_completeness" value="4"> 4</label> <label><input type="radio" name="sis_017_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_017_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_017_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_017_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_017_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_017_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_017_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_017_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_017_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_017_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_017_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_017_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_017_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_017_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_017_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_017_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_017_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_017_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_017_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_017_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_017_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_017_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_017_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_017_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_017_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_017_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_017_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_017_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_018: enrollment</h3>
+            <div class="question"><strong>Question:</strong> What is the process for enrolling a student with an IEP who is also an English Language Learner?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>The student follows the standard enrollment process. Additionally, the special education coordinator must review the IEP within 10 days of enrollment, and the WIDA screener must be administered within 30 days. Both accommodations and language support services should be coordinated.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_018_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_018_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_018_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_018_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_018_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_018_completeness" value="1"> 1</label> <label><input type="radio" name="sis_018_completeness" value="2"> 2</label> <label><input type="radio" name="sis_018_completeness" value="3"> 3</label> <label><input type="radio" name="sis_018_completeness" value="4"> 4</label> <label><input type="radio" name="sis_018_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_018_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_018_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_018_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_018_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_018_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_018_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_018_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_018_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_018_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_018_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_018_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_018_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_018_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_018_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_018_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_018_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_018_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_018_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_018_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_018_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_018_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_018_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_018_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_018_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_018_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_018_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_018_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_019: grading</h3>
+            <div class="question"><strong>Question:</strong> What are the grade category weights for calculating student grades?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Grade weights are: Assessments/Tests 40%, Classwork/Participation 25%, Homework 15%, and Projects/Presentations 20%.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_019_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_019_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_019_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_019_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_019_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_019_completeness" value="1"> 1</label> <label><input type="radio" name="sis_019_completeness" value="2"> 2</label> <label><input type="radio" name="sis_019_completeness" value="3"> 3</label> <label><input type="radio" name="sis_019_completeness" value="4"> 4</label> <label><input type="radio" name="sis_019_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_019_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_019_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_019_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_019_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_019_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_019_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_019_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_019_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_019_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_019_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_019_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_019_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_019_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_019_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_019_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_019_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_019_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_019_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_019_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_019_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_019_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_019_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_019_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_019_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_019_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_019_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_019_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <div class="eval-item">
+            <h3>Qsis_020: ferpa</h3>
+            <div class="question"><strong>Question:</strong> Can parents opt out of directory information disclosure, and what does directory information include?</div>
+            <div class="response"><strong>Model Response:</strong><br>[Not generated yet]</div>
+            <div class="reference"><strong>Reference:</strong><br>Yes, parents may opt out within 30 days of enrollment. Directory information includes student name, address, phone number, date of birth, enrollment status, participation in activities, dates of attendance, and degrees and awards.</div>
+            <div class="ratings">
+                <h4>Ratings (1-5)</h4>
+                
+            <div class="dimension">
+                <strong>Accuracy</strong>: <label><input type="radio" name="sis_020_accuracy" value="1"> 1</label> <label><input type="radio" name="sis_020_accuracy" value="2"> 2</label> <label><input type="radio" name="sis_020_accuracy" value="3"> 3</label> <label><input type="radio" name="sis_020_accuracy" value="4"> 4</label> <label><input type="radio" name="sis_020_accuracy" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Completeness</strong>: <label><input type="radio" name="sis_020_completeness" value="1"> 1</label> <label><input type="radio" name="sis_020_completeness" value="2"> 2</label> <label><input type="radio" name="sis_020_completeness" value="3"> 3</label> <label><input type="radio" name="sis_020_completeness" value="4"> 4</label> <label><input type="radio" name="sis_020_completeness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Domain Appropriateness</strong>: <label><input type="radio" name="sis_020_domain_appropriateness" value="1"> 1</label> <label><input type="radio" name="sis_020_domain_appropriateness" value="2"> 2</label> <label><input type="radio" name="sis_020_domain_appropriateness" value="3"> 3</label> <label><input type="radio" name="sis_020_domain_appropriateness" value="4"> 4</label> <label><input type="radio" name="sis_020_domain_appropriateness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Policy Compliance</strong>: <label><input type="radio" name="sis_020_policy_compliance" value="1"> 1</label> <label><input type="radio" name="sis_020_policy_compliance" value="2"> 2</label> <label><input type="radio" name="sis_020_policy_compliance" value="3"> 3</label> <label><input type="radio" name="sis_020_policy_compliance" value="4"> 4</label> <label><input type="radio" name="sis_020_policy_compliance" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Usefulness</strong>: <label><input type="radio" name="sis_020_usefulness" value="1"> 1</label> <label><input type="radio" name="sis_020_usefulness" value="2"> 2</label> <label><input type="radio" name="sis_020_usefulness" value="3"> 3</label> <label><input type="radio" name="sis_020_usefulness" value="4"> 4</label> <label><input type="radio" name="sis_020_usefulness" value="5"> 5</label>
+            </div>
+            <div class="dimension">
+                <strong>Tone And Style</strong>: <label><input type="radio" name="sis_020_tone_and_style" value="1"> 1</label> <label><input type="radio" name="sis_020_tone_and_style" value="2"> 2</label> <label><input type="radio" name="sis_020_tone_and_style" value="3"> 3</label> <label><input type="radio" name="sis_020_tone_and_style" value="4"> 4</label> <label><input type="radio" name="sis_020_tone_and_style" value="5"> 5</label>
+            </div>
+            </div>
+            <div class="flags">
+                <h4>Flags</h4>
+                <label><input type="checkbox" name="sis_020_hallucination"> Hallucination</label> <label><input type="checkbox" name="sis_020_pii_leak"> Pii Leak</label> <label><input type="checkbox" name="sis_020_unsafe_action"> Unsafe Action</label> <label><input type="checkbox" name="sis_020_cross_tenant_leak"> Cross Tenant Leak</label> <label><input type="checkbox" name="sis_020_missing_citations"> Missing Citations</label> <label><input type="checkbox" name="sis_020_confusing"> Confusing</label> 
+            </div>
+            <div class="feedback">
+                <h4>Free Text Feedback</h4>
+                <textarea name="sis_020_feedback" rows="3" cols="80"></textarea>
+            </div>
+            <hr>
+        </div>
+        <button type="submit" style="padding: 10px 30px; font-size: 16px;">Submit Evaluation</button>
+    </form>
+</body>
+</html>

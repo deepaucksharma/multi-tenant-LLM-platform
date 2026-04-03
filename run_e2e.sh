@@ -103,6 +103,12 @@ if [ "$SKIP_TRAIN" = false ]; then
     log_info "Checking training environment..."
     if python3 -m training.check_env > /tmp/train_env_check.json 2>/dev/null; then
         log_success "Training environment is ready"
+        if python3 -m training.check_model --tenant sis > /tmp/train_model_check.json 2>/dev/null; then
+            log_success "Local base model is ready for offline training"
+        else
+            log_warning "Local base model weights are not available offline"
+            log_info "Training may still work if model download from Hugging Face is available"
+        fi
     else
         log_warning "Training environment is incomplete"
         log_info "Run 'make check-train-env' for details"
@@ -172,7 +178,7 @@ if [ "$SKIP_TRAIN" = false ]; then
     if python3 -m training.check_env >/dev/null 2>&1; then
         # Train SIS
         log_info "Training SIS SFT adapter..."
-        python3 training/sft_train.py --tenant sis --epochs 1
+        python3 -m training.sft_train --tenant sis --epochs 1
         
         if [ $? -eq 0 ]; then
             log_success "SIS adapter trained"
@@ -182,7 +188,7 @@ if [ "$SKIP_TRAIN" = false ]; then
         
         # Train MFG
         log_info "Training MFG SFT adapter..."
-        python3 training/sft_train.py --tenant mfg --epochs 1
+        python3 -m training.sft_train --tenant mfg --epochs 1
         
         if [ $? -eq 0 ]; then
             log_success "MFG adapter trained"

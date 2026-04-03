@@ -6,9 +6,10 @@ and reports which runtime path will be used on the current machine.
 """
 import importlib.util
 import json
+from pathlib import Path
 
 from training.config_loader import get_sft_config
-from training.model_loader import get_training_runtime_config, resolve_device
+from training.model_loader import get_training_runtime_config, resolve_device, resolve_model_source
 
 
 REQUIRED_PACKAGES = [
@@ -37,6 +38,9 @@ def main() -> int:
 
     cfg = get_sft_config("sis")
     runtime = get_training_runtime_config(cfg)
+    model_source = resolve_model_source(cfg, smoke_test=False)
+    model_path = Path(model_source)
+    local_model_ready = model_path.exists() and model_path.is_dir() and any(model_path.iterdir())
 
     report = {
         "device": resolve_device(),
@@ -47,6 +51,11 @@ def main() -> int:
             "fp16": runtime["fp16"],
             "bf16": runtime["bf16"],
             "torch_dtype": str(runtime["torch_dtype"]).replace("torch.", ""),
+        },
+        "model": {
+            "resolved_source": model_source,
+            "local_directory_ready": local_model_ready,
+            "requires_download_if_offline": not local_model_ready,
         },
         "required_packages": package_status,
         "optional_packages": optional_status,

@@ -15,6 +15,41 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Directories that are allowed as roots for local model paths.
+# Only paths that resolve to within one of these roots are accepted.
+_ALLOWED_MODEL_ROOTS: Tuple[Path, ...] = (
+    Path("./models").resolve(),
+    Path(".").resolve(),
+)
+
+def _safe_model_path(path_str: str) -> Optional[str]:
+    """
+    Resolve *path_str* and confirm it lives under one of the allowed model
+    roots.  Returns the original string if it passes, or ``None`` if the
+    resolved path would escape the allowed roots (directory traversal guard).
+
+    Remote identifiers (no '/' and not starting with '.') are passed through
+    unchanged because they are Hub model names such as
+    ``"Qwen/Qwen2.5-1.5B-Instruct"`` and must not be treated as file paths.
+    """
+    # Heuristic: Hub IDs look like "org/model" or "model" — they are not
+    # filesystem paths.  Only validate strings that look like paths.
+    if not path_str or ("/" not in path_str and not path_str.startswith(".")):
+        return path_str  # Hub identifier — no filesystem check needed
+
+    resolved = Path(path_str).resolve()
+    for root in _ALLOWED_MODEL_ROOTS:
+        try:
+            resolved.relative_to(root)
+            return path_str  # ✓ within an allowed root
+        except ValueError:
+            continue
+    logger.error(
+        f"Path traversal attempt blocked: '{path_str}' resolves to '{resolved}' "
+        f"which is outside allowed model roots {[str(r) for r in _ALLOWED_MODEL_ROOTS]}"
+    )
+    return None
+
 
 def resolve_device() -> str:
     """
@@ -100,6 +135,39 @@ def get_training_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def resolve_model_source(config: Dict[str, Any], smoke_test: bool = False) -> str:
+    """
+    Resolve the model source with support for dedicated smoke-test overrides.
+
+    Priority:
+    1. smoke-test env overrides
+    2. config local path if it exists
+    3. smoke-test remote override
+    4. config base model
+
+    All filesystem paths are validated by ``_safe_model_path`` to prevent
+    directory traversal (CWE-22).  Any path that resolves outside the allowed
+    model roots is blocked and skipped.
+    """
+    model_cfg = config["model"]
+
+    if smoke_test:
+        smoke_local = _safe_model_path(os.getenv("SMOKE_TEST_LOCAL_MODEL_PATH", "").strip())
+        if smoke_local and Path(smoke_local).exists():
+            return smoke_local
+
+    model_path = _safe_model_path(model_cfg.get("local_path", model_cfg["base_model"]))
+    if model_path and Path(model_path).exists():
+        return model_path
+
+    if smoke_test:
+        smoke_remote = os.getenv("SMOKE_TEST_BASE_MODEL", "").strip()
+        if smoke_remote:
+            return smoke_remote
+
+    return model_cfg["base_model"]
+
+
 def load_base_model_and_tokenizer(
     config: Dict[str, Any],
     for_training: bool = True,
@@ -119,11 +187,10 @@ def load_base_model_and_tokenizer(
     model_cfg = config["model"]
     quant_cfg = config.get("quantization", {})
     runtime = get_training_runtime_config(config)
-
-    model_path = model_cfg.get("local_path", model_cfg["base_model"])
+    smoke_test = config.get("smoke_test", {}).get("enabled", False)
+    model_path = resolve_model_source(config, smoke_test=smoke_test)
     if not Path(model_path).exists():
-        model_path = model_cfg["base_model"]
-        logger.info(f"Local model not found, using HF hub: {model_path}")
+        logger.info(f"Local model not found, using model source: {model_path}")
 
     logger.info(f"Loading model: {model_path}")
     torch_dtype = runtime["torch_dtype"]
@@ -162,7 +229,16 @@ def load_base_model_and_tokenizer(
             f"(dtype={str(torch_dtype).replace('torch.', '')})"
         )
 
-    model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
+    except Exception as exc:
+        if smoke_test:
+            raise RuntimeError(
+                "Smoke-test model could not be loaded. "
+                "Set SMOKE_TEST_LOCAL_MODEL_PATH to a local tiny model directory "
+                "or set SMOKE_TEST_BASE_MODEL to a downloadable small model."
+            ) from exc
+        raise
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
@@ -282,7 +358,7 @@ def get_gpu_memory_info() -> Dict[str, float]:
 
     allocated = torch.cuda.memory_allocated() / 1024**3
     reserved = torch.cuda.memory_reserved() / 1024**3
-    total = torch.cuda.get_device_properties(0).total_mem / 1024**3
+    total = torch.cuda.get_device_properties(0).total_memory / 1024**3
 
     return {
         "available": True,

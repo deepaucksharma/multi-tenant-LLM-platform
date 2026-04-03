@@ -1,9 +1,9 @@
 # Base training configuration
-# Hardware: 8GB VRAM GPU + 30GB RAM
+# Hardware: AMD RX 6800 XT (16GB VRAM, gfx1030/RDNA2) via ROCm on WSL2
 
 model:
-  base_model: "Qwen/Qwen2.5-1.5B-Instruct"
-  local_path: "./models/base/qwen2.5-1.5b-instruct"
+  base_model: "Qwen/Qwen2.5-0.5B-Instruct"
+  local_path: "./models/base/qwen2.5-0.5b-instruct"
   max_seq_length: 512
   torch_dtype: "float16"
 

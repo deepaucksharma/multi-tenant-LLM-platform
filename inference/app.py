@@ -86,7 +86,15 @@ async def health_check():
     backend = get_model_backend()
     stats = backend.get_stats()
     base_loaded = bool(stats.get("base_loaded"))
-    status = "healthy" if base_loaded or stats.get("backend") == "huggingface" else "degraded"
+    ready = bool(stats.get("ready", base_loaded))
+    if base_loaded:
+        status = "healthy"
+    elif ready and stats.get("load_strategy") == "lazy":
+        status = "ready"
+    elif ready:
+        status = "healthy"
+    else:
+        status = "degraded"
 
     return HealthResponse(
         status=status,
@@ -103,7 +111,7 @@ async def health_check():
 
 @app.get("/backend/status", tags=["System"])
 async def backend_status():
-    """Detailed backend status for local setup checks."""
+    """Detailed backend status — includes which backend is active and resolved models."""
     backend = get_model_backend()
     return backend.get_stats()
 
@@ -168,7 +176,6 @@ async def chat(
 
         route = get_tenant_route(tenant_id, model_type)
 
-        # Load adapter
         backend = get_model_backend()
         backend.prepare_route(route)
         model_version = backend.get_model_label(tenant_id, model_type, route)
@@ -203,12 +210,20 @@ async def chat(
                         top_p=request.top_p,
                         tenant_id=tenant_id,
                         model_type=model_type,
+                        adapter_key=route.adapter_key,
                     )
 
                 rag_response = execute_rag_chain(rag_request, generate_fn=gen_fn)
 
+                # Enforce tenant isolation: filter any cross-tenant chunks before
+                # they are surfaced as citations or influence downstream grounding.
+                clean_citations = validate_tenant_isolation(
+                    tenant_id,
+                    rag_response.citations,
+                )
+
                 answer = rag_response.answer
-                citations = [Citation(**c) for c in rag_response.citations]
+                citations = [Citation(**c) for c in clean_citations]
                 retrieval_time_ms = rag_response.retrieval_time_ms
                 retrieval_method = rag_response.retrieval_result.get("retrieval_method", "")
                 if rag_response.grounding_report:
@@ -224,6 +239,7 @@ async def chat(
                     top_p=request.top_p,
                     tenant_id=tenant_id,
                     model_type=model_type,
+                    adapter_key=route.adapter_key,
                 )
         else:
             messages.append({"role": "user", "content": request.message})
@@ -234,6 +250,7 @@ async def chat(
                 top_p=request.top_p,
                 tenant_id=tenant_id,
                 model_type=model_type,
+                adapter_key=route.adapter_key,
             )
 
         total_time = round((time.time() - t_start) * 1000, 2)
@@ -246,6 +263,7 @@ async def chat(
             user_message=request.message,
             model_response=answer,
             model_type=model_type,
+            model_version=model_version,
             adapter_key=route.adapter_key,
             is_canary=is_canary,
             use_rag=request.use_rag,
@@ -309,6 +327,8 @@ async def chat_stream(
         try:
             canary_mgr = get_canary_manager()
             model_type, is_canary = canary_mgr.get_model_type(tenant_id)
+            if request.model_type.value != "sft":
+                model_type = request.model_type.value
 
             route = get_tenant_route(tenant_id, model_type)
 
@@ -335,9 +355,39 @@ async def chat_stream(
                         top_k=3,
                     )
                     retrieval_time_ms = retrieval_result.retrieval_time_ms
-                    context = format_context_for_llm(retrieval_result)
-                    citations_data = format_citations(retrieval_result)
-                    retrieval_chunks = [c.content for c in retrieval_result.chunks]
+
+                    # Enforce tenant isolation: filter cross-tenant chunks before
+                    # they reach the prompt or are returned as citations.
+                    # Note: the retriever already applies _validate_isolation internally;
+                    # this is a defense-in-depth second pass at the app layer.
+                    clean_chunk_ids = {
+                        ch["chunk_id"]
+                        for ch in validate_tenant_isolation(
+                            tenant_id,
+                            [
+                                {
+                                    "chunk_id": c.citation_key,
+                                    "tenant_id": getattr(c, "tenant_id", tenant_id),
+                                }
+                                for c in retrieval_result.chunks
+                            ],
+                        )
+                    }
+                    clean_result_chunks = [
+                        c for c in retrieval_result.chunks
+                        if c.citation_key in clean_chunk_ids
+                    ]
+                    retrieval_chunks = [c.content for c in clean_result_chunks]
+
+                    # Build context and citations from the filtered chunk list only
+                    from dataclasses import replace as dc_replace
+                    filtered_result = dc_replace(
+                        retrieval_result,
+                        chunks=clean_result_chunks,
+                        total_retrieved=len(clean_result_chunks),
+                    )
+                    context = format_context_for_llm(filtered_result)
+                    citations_data = format_citations(filtered_result)
 
                     user_msg = (
                         f"Context from knowledge base:\n"
@@ -368,6 +418,7 @@ async def chat_stream(
                 top_p=request.top_p,
                 tenant_id=tenant_id,
                 model_type=model_type,
+                adapter_key=route.adapter_key,
             ):
                 full_response += token
                 yield {
@@ -376,7 +427,6 @@ async def chat_stream(
                 }
 
             total_time = round((time.time() - t_start) * 1000, 2)
-
             grounding_score = None
             if request.use_rag and retrieval_chunks and full_response:
                 try:
@@ -392,6 +442,7 @@ async def chat_stream(
                 user_message=request.message,
                 model_response=full_response,
                 model_type=model_type,
+                model_version=model_version,
                 adapter_key=route.adapter_key,
                 is_canary=is_canary,
                 use_rag=request.use_rag,
@@ -476,7 +527,7 @@ async def get_recent(
 
 @app.get("/model/stats", tags=["Monitoring"])
 async def get_model_stats():
-    """Get model/adapter statistics."""
+    """Get model/adapter statistics. Proxies to the active backend."""
     backend = get_model_backend()
     return backend.get_stats()
 

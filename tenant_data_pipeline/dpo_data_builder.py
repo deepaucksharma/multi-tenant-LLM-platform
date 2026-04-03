@@ -3,9 +3,23 @@ DPO (Direct Preference Optimization) preference pair dataset builder.
 Creates alignment training data: chosen (safe/correct) vs rejected (unsafe/wrong) responses.
 SIS: FERPA compliance, PII protection, procedure adherence.
 MFG: Safety-first, quality control, procedure adherence.
+
+Grounding strategy
+------------------
+When processed / chunked documents are available (same lookup order as
+sft_data_builder), each chunk is turned into a (prompt, chosen, rejected)
+triplet:
+- ``prompt``   — ask about the topic/procedure in the chunk.
+- ``chosen``   — an answer grounded in the actual chunk content.
+- ``rejected`` — a topically plausible *but wrong* shortcut drawn from a
+                 small library of rejection templates per topic-domain.
+
+Corpus pairs supplement (never replace) the hardcoded alignment examples,
+which cover critical safety/privacy edge-cases that need explicit labelling.
 """
 import json
 import random
+from pathlib import Path
 from typing import Dict, List
 
 from loguru import logger
@@ -189,24 +203,213 @@ MFG_DPO_PAIRS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Corpus-to-DPO conversion helpers
+# ---------------------------------------------------------------------------
+
+# Fraction of the final DPO dataset from corpus-derived pairs.
+TARGET_CORPUS_RATIO = 0.50
+
+# Topic-level rejection templates.
+# For each topic we define one or more "bad response" snippets that represent
+# the kind of unsafe/incorrect shortcut the model should learn to reject.
+_REJECTED_TEMPLATES: Dict[str, List[str]] = {
+    # SIS domain — common FERPA violations and procedure shortcuts
+    "ferpa_compliance": [
+        "Just share the records directly. Parents always have access rights and don't need to verify anything.",
+        "You can disclose the information verbally without logging it. Nobody tracks that.",
+        "Email the full student record to whoever asked. Verification is just bureaucracy.",
+    ],
+    "enrollment": [
+        "Tell the student to come back when they have all documents. No exceptions allowed.",
+        "Skip the McKinney-Vento steps; they take too long and most families will manage.",
+        "Just use whatever details the parent tells you without checking the system.",
+    ],
+    "attendance": [
+        "Don't bother recording attendance every period — the end-of-day summary is enough.",
+        "Skip the parent contact for unexcused absences; they'll figure it out from the report card.",
+        "Ignore the intervention protocol; too many steps for a minor issue.",
+    ],
+    "grading": [
+        "Just change the grade directly in the system without filling out any form.",
+        "Incomplete grades don't need to be resolved — leave them and they'll sort themselves out.",
+        "The principal doesn't need to approve grade changes; teachers have full authority.",
+    ],
+    "transcripts": [
+        "Release the transcript to whoever asks — parents always have the right.",
+        "Don't bother verifying identity over the phone before reading out grades.",
+    ],
+    "accommodations": [
+        "Share the full IEP with the tutor via email; they need the information to help.",
+        "You can skip the 60-day timeline if the caseload is too high.",
+    ],
+    "disciplinary": [
+        "Suspend the student immediately without following the progressive discipline steps.",
+        "Put the disciplinary notes directly on the official transcript.",
+    ],
+    "parent_communication": [
+        "Just tell the parent what they want to know — no need to check identity first.",
+        "Text the parent from your personal phone to keep it informal.",
+    ],
+    "transfer": [
+        "Just guess which courses match and assign full credit without reviewing the transcript.",
+        "Don't wait for official records — the parent said the grades were good.",
+    ],
+    "records_management": [
+        "Delete old records whenever you need storage space; nobody checks the retention schedule.",
+        "Give everyone the same access level to keep things simple.",
+    ],
+    # MFG domain — safety bypasses and quality shortcuts
+    "safety_protocols": [
+        "Put up a warning sign and continue production — safety devices slow things down.",
+        "Small chemical spills are fine to mop up yourself without telling EHS.",
+        "Safety checks are for the big jobs; skip them when you're behind on targets.",
+    ],
+    "standard_operating_procedures": [
+        "Skip the pre-startup checklist when you're behind schedule — it's just paperwork.",
+        "Run at full speed immediately; the warm-up phase is a waste of time.",
+    ],
+    "quality_control": [
+        "Keep the line running and sort out the quality issue at end of shift.",
+        "Use the out-of-calibration tool if a calibrated one isn't immediately available.",
+    ],
+    "capa": [
+        "Log it and move on — CAPA paperwork is excessive for a minor issue.",
+        "Close the CAPA once the fix is applied; effectiveness verification wastes time.",
+    ],
+    "maintenance": [
+        "Just flip the switch and work fast — full LOTO is overkill for quick repairs.",
+        "Skip daily PM checks today; the machine was fine yesterday.",
+    ],
+    "defect_classification": [
+        "Don't stop the line for one defect — pull the unit aside and keep going.",
+        "Class 1 notifications can wait until end of shift when you have the full picture.",
+    ],
+    "production_scheduling": [
+        "Override the master schedule without telling the production manager — just get it done.",
+        "Skip the changeover checklist; it costs too much time.",
+    ],
+    "regulatory_compliance": [
+        "Fix the issue quietly without filing a formal report; no need to invite scrutiny.",
+        "Backdate the record so the paperwork looks right for the auditor.",
+    ],
+    "inventory_management": [
+        "Skip the cycle count this month — we're busy and the numbers are probably fine.",
+        "Don't quarantine suspect material; we need it to meet the shipment deadline.",
+    ],
+    "iso_documentation": [
+        "Update the document but skip the approval signatures to save time.",
+        "Annual audits are just a formality; you can mark items as compliant without checking.",
+    ],
+    # Generic fallback
+    "general": [
+        "Skip the documented procedure if it takes too long.",
+        "Don't file the report; nobody will notice.",
+        "Just do whatever seems easiest — the rules are just guidelines.",
+    ],
+}
+
+
+def _pick_rejected(topic: str) -> str:
+    """Pick a random rejection template for the given topic."""
+    options = _REJECTED_TEMPLATES.get(topic, _REJECTED_TEMPLATES["general"])
+    return random.choice(options)
+
+
+def _load_chunks(tenant_id: str) -> List[Dict]:
+    """
+    Load processed document chunks for a tenant (same lookup order as
+    sft_data_builder._load_chunks).
+    """
+    config = TENANTS[tenant_id]
+    candidates = [
+        config.chunks_dir / "chunks.json",
+        config.processed_dir / "redacted_documents.json",
+        config.processed_dir / "ingested_documents.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data:
+                    logger.info(
+                        f"[{tenant_id}] DPO builder: loaded {len(data)} items "
+                        f"from {path.name}"
+                    )
+                    return data
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[{tenant_id}] Could not parse {path}: {exc}"
+                )
+    logger.info(
+        f"[{tenant_id}] DPO builder: no corpus data found, using seed pairs only."
+    )
+    return []
+
+
+def _chunks_to_dpo_pairs(chunks: List[Dict], tenant_id: str) -> List[Dict]:
+    """
+    Convert ingested / chunked documents into DPO preference pairs.
+
+    Each chunk yields one triplet:
+    - prompt   : asks about the chunk's topic/procedure.
+    - chosen   : a grounded answer drawn directly from chunk content.
+    - rejected : a plausible but unsafe/incorrect shortcut from the
+                 topic-level rejection template library.
+    """
+    pairs: List[Dict] = []
+    config = TENANTS[tenant_id]
+    system_prompt = _get_system_prompt(tenant_id)
+
+    for item in chunks:
+        content = item.get("content_redacted") or item.get("content", "")
+        if not content or len(content.strip()) < 80:
+            continue
+        topic = item.get("topic", "general")
+
+        prompt = (
+            f"Based on our documented procedures, what is the correct way to "
+            f"handle {topic.replace('_', ' ')} situations?\n\n"
+            f"Policy excerpt:\n{content.strip()}"
+        )
+        chosen = (
+            f"According to the documented policy:\n\n{content.strip()}\n\n"
+            f"Always follow the procedure exactly as documented."
+        )
+        rejected = _pick_rejected(topic)
+
+        pairs.append({
+            "system": system_prompt,
+            "prompt": prompt,
+            "chosen": chosen,
+            "rejected": rejected,
+            "topic": topic,
+            "alignment_type": "corpus_grounded",
+            "tenant_id": tenant_id,
+            "source": "corpus",
+            "doc_id": item.get("doc_id") or item.get("chunk_id", ""),
+        })
+    return pairs
+
+
 def build_dpo_dataset(tenant_id: str) -> List[Dict]:
     """Build DPO preference dataset for a tenant."""
     config = TENANTS[tenant_id]
     config.dpo_dir.mkdir(parents=True, exist_ok=True)
 
     if tenant_id == "sis":
-        pairs = SIS_DPO_PAIRS
+        seed_pairs = SIS_DPO_PAIRS
     elif tenant_id == "mfg":
-        pairs = MFG_DPO_PAIRS
+        seed_pairs = MFG_DPO_PAIRS
     else:
         logger.error(f"Unknown tenant: {tenant_id}")
         return []
 
     system_prompt = _get_system_prompt(tenant_id)
 
-    formatted = []
-    for pair in pairs:
-        formatted.append({
+    # ---- 1. Hardcoded seed pairs (always included) ----
+    formatted_seed = [
+        {
             "system": system_prompt,
             "prompt": pair["prompt"],
             "chosen": pair["chosen"],
@@ -214,10 +417,31 @@ def build_dpo_dataset(tenant_id: str) -> List[Dict]:
             "topic": pair["topic"],
             "alignment_type": pair["alignment_type"],
             "tenant_id": tenant_id,
-        })
+            "source": "seed",
+        }
+        for pair in seed_pairs
+    ]
+
+    # ---- 2. Corpus-derived pairs ----
+    chunks = _load_chunks(tenant_id)
+    corpus_pairs = _chunks_to_dpo_pairs(chunks, tenant_id)
+    random.shuffle(corpus_pairs)
+
+    # ---- 3. Blend: up to TARGET_CORPUS_RATIO from corpus ----
+    total = len(formatted_seed) + len(corpus_pairs)
+    corpus_target = int(total * TARGET_CORPUS_RATIO)
+    corpus_trimmed = corpus_pairs[:corpus_target]
+
+    formatted = formatted_seed + corpus_trimmed
+    random.shuffle(formatted)
+
+    logger.info(
+        f"[{tenant_id}] DPO mix: {len(corpus_trimmed)} corpus-derived + "
+        f"{len(formatted_seed)} seed pairs "
+        f"(corpus ratio {len(corpus_trimmed) / max(len(formatted), 1):.1%})"
+    )
 
     # Split train/eval (85/15)
-    random.shuffle(formatted)
     split_idx = max(1, int(len(formatted) * 0.85))
     train_set = formatted[:split_idx]
     eval_set = formatted[split_idx:]
@@ -275,11 +499,7 @@ def _to_trl_dpo_format(example: Dict) -> Dict:
 
 
 def build_all_dpo_datasets() -> Dict:
-    results = {}
-    for tenant_id in TENANTS:
-        dataset = build_dpo_dataset(tenant_id)
-        results[tenant_id] = len(dataset)
-    return results
+    return {tenant_id: len(build_dpo_dataset(tenant_id)) for tenant_id in TENANTS}
 
 
 if __name__ == "__main__":

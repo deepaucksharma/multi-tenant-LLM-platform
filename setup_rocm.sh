@@ -77,11 +77,11 @@ export PATH=\$ROCM_PATH/bin:\$PATH
 export LD_LIBRARY_PATH=\$ROCM_PATH/lib:\$LD_LIBRARY_PATH
 
 # AMD GPU Optimization
-export HSA_OVERRIDE_GFX_VERSION=11.0.0  # Adjust for your GPU
+export HSA_OVERRIDE_GFX_VERSION=10.3.0  # RX 6800 XT (RDNA2)
 export HSA_ENABLE_SDMA=0
 export GPU_MAX_HW_QUEUES=4
 export AMD_DIRECT_DISPATCH=1
-export PYTORCH_ROCM_ARCH=gfx1100  # Adjust for your GPU
+export PYTORCH_ROCM_ARCH=gfx1030  # RX 6800 XT (RDNA2)
 "
 
 if ! grep -q "ROCM_PATH" ~/.bashrc; then
@@ -126,7 +126,7 @@ log_info "Installing PyTorch with ROCm support..."
 pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
 
 # Install ROCm PyTorch
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.1
 
 # Step 10: Verify PyTorch
 log_info "Verifying PyTorch installation..."

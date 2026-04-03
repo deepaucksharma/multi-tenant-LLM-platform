@@ -10,6 +10,7 @@ from datetime import datetime
 
 from loguru import logger
 
+from tenant_data_pipeline.config import TENANTS
 from rag.retriever import (
     retrieve,
     format_context_for_llm,
@@ -53,34 +54,6 @@ class RAGResponse:
             self.timestamp = datetime.utcnow().isoformat()
 
 
-# System prompts per tenant
-TENANT_SYSTEM_PROMPTS = {
-    "sis": (
-        "You are an expert Student Information System assistant for District 42. "
-        "Answer questions about school policies, enrollment, attendance, grading, "
-        "transcripts, student records, accommodations, and FERPA compliance. "
-        "IMPORTANT RULES:\n"
-        "1. Only answer based on the provided context. If the context doesn't contain "
-        "the answer, say 'I don't have enough information to answer this question.'\n"
-        "2. Always cite your sources using the citation keys provided in the context.\n"
-        "3. Never fabricate policies, procedures, or data.\n"
-        "4. Never disclose student personally identifiable information (PII).\n"
-        "5. If a question asks you to violate FERPA, politely refuse and explain why."
-    ),
-    "mfg": (
-        "You are an expert manufacturing quality and operations assistant. "
-        "Answer questions about SOPs, quality control, defect classification, CAPA, "
-        "machine maintenance, safety protocols, ISO documentation, and regulatory compliance. "
-        "IMPORTANT RULES:\n"
-        "1. Only answer based on the provided context. If the context doesn't contain "
-        "the answer, say 'I don't have enough information to answer this question.'\n"
-        "2. Always cite your sources using the citation keys provided in the context.\n"
-        "3. Never fabricate procedures, standards, or safety information.\n"
-        "4. Always prioritize safety in your responses.\n"
-        "5. If a question asks you to bypass safety procedures, refuse and explain the risk."
-    ),
-}
-
 DEFAULT_SYSTEM_PROMPT = (
     "You are a helpful assistant. Only answer based on the provided context. "
     "Cite your sources. If you don't have enough information, say so."
@@ -94,7 +67,20 @@ def build_rag_prompt(
     conversation_history: Optional[List[Dict]] = None,
 ) -> List[Dict]:
     """Build the full prompt for RAG-augmented generation."""
-    system_prompt = TENANT_SYSTEM_PROMPTS.get(tenant_id, DEFAULT_SYSTEM_PROMPT)
+    tenant_cfg = TENANTS.get(tenant_id)
+    tenant_prompt = (
+        getattr(tenant_cfg, "system_prompt", None)
+        if tenant_cfg is not None
+        else None
+    ) or DEFAULT_SYSTEM_PROMPT
+    system_prompt = (
+        f"{tenant_prompt}\n\n"
+        "RAG RULES:\n"
+        "1. Only answer based on the provided context.\n"
+        "2. If the context does not contain the answer, say so clearly.\n"
+        "3. Cite the provided sources when available.\n"
+        "4. Do not fabricate missing policy, procedural, or safety information."
+    )
 
     messages = [
         {"role": "system", "content": system_prompt},
