@@ -1,0 +1,26 @@
+models/
+data/
+mlruns/
+mlflow.db
+node_modules/
+web_app/.next/
+web_app/node_modules/
+mobile_app/build/
+.git/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+logs/
+evaluation/reports/
+notebooks/*.ipynb
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+ref 1/
+ref 2/

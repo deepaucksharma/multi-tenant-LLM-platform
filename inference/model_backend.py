@@ -4,6 +4,7 @@ Inference backend selection for local development and deployment.
 Supports:
 - Hugging Face + PEFT adapter swapping (existing path)
 - Ollama over HTTP (preferred local AMD/WSL path)
+- HF Serverless Inference API (zero-GPU remote path)
 """
 import os
 import json
@@ -13,6 +14,7 @@ import httpx
 from loguru import logger
 
 from inference.adapter_manager import get_adapter_manager
+from inference.hf_inference_backend import HFInferenceBackend
 
 
 class HFBackend:
@@ -264,11 +266,18 @@ def get_model_backend():
         _backend = ollama
     elif requested == "hf":
         _backend = HFBackend()
+    elif requested == "hf_inference":
+        _backend = HFInferenceBackend()
     elif requested == "auto":
-        _backend = ollama if ollama.is_available() else HFBackend()
+        if ollama.is_available():
+            _backend = ollama
+        elif os.getenv("HF_TOKEN"):
+            _backend = HFInferenceBackend()
+        else:
+            _backend = HFBackend()
     else:
         raise ValueError(
-            "INFERENCE_BACKEND must be one of: auto, ollama, hf"
+            "INFERENCE_BACKEND must be one of: auto, ollama, hf, hf_inference"
         )
 
     logger.info(f"Selected inference backend: {_backend.name}")

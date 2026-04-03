@@ -1,4 +1,4 @@
-.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry eval web mobile voice monitor test clean all
+.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama serve-hf-inference check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry push-hub-private push-hub-merged push-datasets push-datasets-dry generate-colab docker-build docker-run eval web mobile voice monitor test clean all
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -64,6 +64,9 @@ serve-prod:
 serve-ollama:
 	INFERENCE_BACKEND=ollama $(PYTHON) -m uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
 
+serve-hf-inference:
+	INFERENCE_BACKEND=hf_inference $(PYTHON) -m uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
+
 check-ollama:
 	$(PYTHON) -c "from inference.model_backend import OllamaBackend; b = OllamaBackend(); print({'available': b.is_available(), 'base_url': b.base_url, 'models': b.list_models() if b.is_available() else []})"
 
@@ -92,6 +95,40 @@ push-hub-weights:
 ## Dry-run: show what would be pushed without uploading
 push-hub-dry:
 	$(PYTHON) -m training.push_to_hub --all --dry-run
+
+## Push adapters as private repos
+push-hub-private:
+	$(PYTHON) -m training.push_to_hub --all --private
+
+## Push merged full models from models/merged/ (~3 GB per model)
+push-hub-merged:
+	$(PYTHON) -m training.push_to_hub --all --merged --weights
+
+# ── Dataset Hub publishing ─────────────────────────────────────────────────────
+
+## Push SFT/DPO datasets to HF Hub (public dataset repos)
+push-datasets:
+	$(PYTHON) -m training.push_datasets --all
+
+## Dry-run: show what would be uploaded
+push-datasets-dry:
+	$(PYTHON) -m training.push_datasets --all --dry-run
+
+# ── Colab notebook ─────────────────────────────────────────────────────────────
+
+## Generate the Google Colab training notebook
+generate-colab:
+	$(PYTHON) notebooks/generate_colab_notebook.py
+
+# ── Docker (HF Spaces) ─────────────────────────────────────────────────────────
+
+## Build Docker image for HF Spaces deployment
+docker-build:
+	docker build -t multi-tenant-llm-demo .
+
+## Run Docker image locally (set HF_TOKEN in .env first)
+docker-run:
+	docker run --rm -p 7860:7860 --env-file .env multi-tenant-llm-demo
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 eval:

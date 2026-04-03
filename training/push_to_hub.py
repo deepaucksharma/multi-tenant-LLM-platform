@@ -40,9 +40,11 @@ load_dotenv()
 HF_HUB_NAMESPACE: str = os.getenv("HF_HUB_NAMESPACE", "deepaucksharma")
 HF_REPO_PREFIX: str = os.getenv("HF_REPO_PREFIX", "multi-tenant-llm")
 HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
+HF_REPO_PRIVATE: bool = os.getenv("HF_REPO_PRIVATE", "false").lower() == "true"
 
 # Adapter paths follow the convention models/adapters/{tenant}/{type}/
 ADAPTERS_ROOT = Path("./models/adapters")
+MERGED_ROOT = Path("./models/merged")
 
 # Files that are safe to push (small metadata / config), even without --weights
 METADATA_GLOBS = [
@@ -74,6 +76,10 @@ def _repo_id(tenant_id: str, model_type: str) -> str:
 
 def _adapter_path(tenant_id: str, model_type: str) -> Path:
     return ADAPTERS_ROOT / tenant_id / model_type
+
+
+def _merged_path(tenant_id: str, model_type: str) -> Path:
+    return MERGED_ROOT / tenant_id / model_type
 
 
 def _load_training_metadata(adapter_dir: Path) -> dict:
@@ -176,9 +182,11 @@ def push_adapter(
     push_weights: bool = False,
     eval_report_path: Optional[str] = None,
     dry_run: bool = False,
+    private: bool = False,
+    merged: bool = False,
 ) -> dict:
     """
-    Push a single adapter to the Hub.
+    Push a single adapter (or merged model) to the Hub.
 
     Args:
         tenant_id:        'sis' or 'mfg'
@@ -187,18 +195,26 @@ def push_adapter(
                           Default False — only metadata + config.
         eval_report_path: Path to a JSON eval report to embed in the model card.
         dry_run:          Print actions without uploading.
+        private:          Create a private repo (default: False).
+        merged:           If True, push merged full model from models/merged/ instead of adapter.
 
     Returns:
         dict with 'repo_id', 'url', 'files_pushed'
     """
-    adapter_dir = _adapter_path(tenant_id, model_type)
+    if merged:
+        adapter_dir = _merged_path(tenant_id, model_type)
+        repo_suffix = f"{tenant_id}-{model_type}-merged"
+    else:
+        adapter_dir = _adapter_path(tenant_id, model_type)
+        repo_suffix = f"{tenant_id}-{model_type}"
     if not adapter_dir.exists():
+        source = "models/merged/" if merged else "models/adapters/"
         raise FileNotFoundError(
-            f"Adapter directory not found: {adapter_dir}\n"
-            f"Run 'make train' first to produce {tenant_id}/{model_type} adapter."
+            f"Directory not found: {adapter_dir}\n"
+            f"Run 'make train' first to produce {tenant_id}/{model_type} artifacts in {source}."
         )
 
-    repo_id = _repo_id(tenant_id, model_type)
+    repo_id = f"{HF_HUB_NAMESPACE}/{HF_REPO_PREFIX}-{repo_suffix}"
     metadata = _load_training_metadata(adapter_dir)
 
     # Resolve eval report
@@ -260,7 +276,7 @@ def push_adapter(
             repo_id=repo_id,
             repo_type="model",
             exist_ok=True,
-            private=False,
+            private=private,
         )
         logger.info(f"Repo ready: https://huggingface.co/{repo_id}")
     except Exception as exc:
@@ -295,14 +311,65 @@ def push_adapter(
     }
 
 
-def push_all(push_weights: bool = False, dry_run: bool = False) -> list[dict]:
-    """Push all adapters that exist locally."""
+def push_eval_reports(
+    tenant_id: str,
+    report_path: str,
+    model_type: str = "sft",
+    dry_run: bool = False,
+) -> dict:
+    """
+    Upload an evaluation JSON report to the existing adapter repo on Hub.
+
+    The report is stored at eval_reports/{filename} in the model repo.
+    """
+    report_file = Path(report_path)
+    if not report_file.exists():
+        raise FileNotFoundError(f"Eval report not found: {report_path}")
+
+    repo_id = _repo_id(tenant_id, model_type)
+    repo_path = f"eval_reports/{report_file.name}"
+
+    if dry_run:
+        size_kb = report_file.stat().st_size // 1024
+        logger.info(f"[DRY RUN] Would upload {report_file.name} ({size_kb} KB) → {repo_id}/{repo_path}")
+        return {"repo_id": repo_id, "repo_path": repo_path, "dry_run": True}
+
+    if not HF_TOKEN:
+        raise EnvironmentError(
+            "HF_TOKEN is not set. Get a write token from https://huggingface.co/settings/tokens"
+        )
+
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=HF_TOKEN)
+    api.upload_file(
+        path_or_fileobj=str(report_file),
+        path_in_repo=repo_path,
+        repo_id=repo_id,
+        repo_type="model",
+        commit_message=f"Add eval report {report_file.name}",
+    )
+    url = f"https://huggingface.co/{repo_id}/blob/main/{repo_path}"
+    logger.success(f"[{repo_id}] Eval report uploaded → {url}")
+    return {"repo_id": repo_id, "repo_path": repo_path, "url": url, "dry_run": False}
+
+
+def push_all(
+    push_weights: bool = False,
+    dry_run: bool = False,
+    private: bool = False,
+    merged: bool = False,
+) -> list[dict]:
+    """Push all adapters (or merged models) that exist locally."""
     results = []
-    if not ADAPTERS_ROOT.exists():
-        logger.warning(f"Adapters root not found: {ADAPTERS_ROOT}  (run 'make train' first)")
+    root = MERGED_ROOT if merged else ADAPTERS_ROOT
+    marker = "config.json" if merged else "adapter_config.json"
+
+    if not root.exists():
+        logger.warning(f"Root not found: {root}  (run 'make train' first)")
         return results
 
-    for tenant_dir in sorted(ADAPTERS_ROOT.iterdir()):
+    for tenant_dir in sorted(root.iterdir()):
         if not tenant_dir.is_dir():
             continue
         tenant_id = tenant_dir.name
@@ -310,13 +377,17 @@ def push_all(push_weights: bool = False, dry_run: bool = False) -> list[dict]:
             if not type_dir.is_dir():
                 continue
             model_type = type_dir.name
-            # Only push if adapter_config.json exists (confirms it's a real adapter)
-            if not (type_dir / "adapter_config.json").exists():
-                logger.debug(f"Skipping {tenant_id}/{model_type} — no adapter_config.json")
+            if not (type_dir / marker).exists():
+                logger.debug(f"Skipping {tenant_id}/{model_type} — no {marker}")
                 continue
             try:
                 result = push_adapter(
-                    tenant_id, model_type, push_weights=push_weights, dry_run=dry_run
+                    tenant_id,
+                    model_type,
+                    push_weights=push_weights,
+                    dry_run=dry_run,
+                    private=private,
+                    merged=merged,
                 )
                 results.append(result)
             except Exception as exc:
@@ -357,6 +428,16 @@ def main():
         help="Print what would be pushed without uploading anything",
     )
     parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Create private HF repos (default: public)",
+    )
+    parser.add_argument(
+        "--merged",
+        action="store_true",
+        help="Push merged full models from models/merged/ instead of LoRA adapters",
+    )
+    parser.add_argument(
         "--namespace",
         type=str,
         default=None,
@@ -365,11 +446,18 @@ def main():
     args = parser.parse_args()
 
     if args.namespace:
-        global HF_HUB_NAMESPACE
-        HF_HUB_NAMESPACE = args.namespace
+        import training.push_to_hub as _self
+        _self.HF_HUB_NAMESPACE = args.namespace
+
+    effective_private = args.private or HF_REPO_PRIVATE
 
     if args.all:
-        results = push_all(push_weights=args.weights, dry_run=args.dry_run)
+        results = push_all(
+            push_weights=args.weights,
+            dry_run=args.dry_run,
+            private=effective_private,
+            merged=args.merged,
+        )
     elif args.tenant:
         results = [
             push_adapter(
@@ -378,6 +466,8 @@ def main():
                 push_weights=args.weights,
                 eval_report_path=args.eval_report,
                 dry_run=args.dry_run,
+                private=effective_private,
+                merged=args.merged,
             )
         ]
     else:
