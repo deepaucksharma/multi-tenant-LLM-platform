@@ -41,14 +41,21 @@ jobs:
           pip install -r requirements-ci.txt
           pip install pytest ruff
 
+      - name: Download NLTK data
+        run: |
+          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
+
       - name: Lint with ruff
         run: |
           ruff check --select E,F,W --ignore E501 \
-            tenant_data_pipeline/ evaluation/ monitoring/ mlops/ || true
+            tenant_data_pipeline/ evaluation/ monitoring/ mlops/ \
+            inference/ rag/ training/ voice_agent/ || echo "Linting completed with warnings"
+        continue-on-error: true
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/ -v --tb=short || true
+          python -m pytest tests/ -v --tb=short
+        continue-on-error: false
 
       - name: Test config imports
         run: |
@@ -72,7 +79,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements-ci.txt
+        run: |
+          pip install -r requirements-ci.txt
+          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
 
       - name: Run data pipeline
         run: python -m tenant_data_pipeline.run_pipeline
@@ -115,7 +124,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements-ci.txt
+        run: |
+          pip install -r requirements-ci.txt
+          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
 
       - name: Download data artifacts
         uses: actions/download-artifact@v4
@@ -173,7 +184,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements-ci.txt
+        run: |
+          pip install -r requirements-ci.txt
+          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
 
       - name: Test monitoring imports
         run: |
