@@ -1,4 +1,4 @@
-.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env check-model-ready eval web mobile voice monitor test clean all
+.PHONY: setup setup-rocm install-rocm-torch mlflow data train train-smoke train-smoke-tiny dpo index serve serve-prod serve-ollama check-ollama register-ollama-models check-train-env check-model-ready push-hub push-hub-weights push-hub-dry eval web mobile voice monitor test clean all
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -75,6 +75,23 @@ check-train-env:
 
 check-model-ready:
 	$(PYTHON) -m training.check_model --tenant sis --smoke-test
+
+# ── Hugging Face Hub ───────────────────────────────────────────────────────────
+# Profile: https://huggingface.co/deepaucksharma
+# Repos:   https://huggingface.co/deepaucksharma?search=multi-tenant-llm
+# Requires HF_TOKEN in .env (write-scoped token from huggingface.co/settings/tokens)
+
+## Push adapter config/metadata JSON only (no weight files — safe, fast)
+push-hub:
+	$(PYTHON) -m training.push_to_hub --all
+
+## Push adapter configs AND .safetensors weights (~200-600 MB per adapter)
+push-hub-weights:
+	$(PYTHON) -m training.push_to_hub --all --weights
+
+## Dry-run: show what would be pushed without uploading
+push-hub-dry:
+	$(PYTHON) -m training.push_to_hub --all --dry-run
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 eval:

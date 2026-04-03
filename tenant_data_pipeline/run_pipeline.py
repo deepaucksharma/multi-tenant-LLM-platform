@@ -4,6 +4,7 @@ Runs all pipeline stages in sequence for all tenants.
 """
 import json
 import time
+import traceback
 from pathlib import Path
 from datetime import datetime
 
@@ -18,6 +19,39 @@ from tenant_data_pipeline.sft_data_builder import build_all_sft_datasets
 from tenant_data_pipeline.dpo_data_builder import build_all_dpo_datasets
 
 
+def _write_pipeline_report(results: dict) -> Path:
+    """Persist current pipeline status so failures leave a usable report."""
+    report_dir = Path("evaluation/reports")
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"pipeline_run_{results['pipeline_run_id']}.json"
+    report_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    return report_path
+
+
+def _run_stage(results: dict, stage_key: str, message: str, fn, summarize):
+    """Execute one stage, recording status and persisting partial progress."""
+    logger.info(f"\n{message}")
+    t0 = time.time()
+    try:
+        stage_result = fn()
+        results["stages"][stage_key] = {
+            "status": "success",
+            **summarize(stage_result),
+            "duration_sec": round(time.time() - t0, 2),
+        }
+        _write_pipeline_report(results)
+        return stage_result
+    except Exception as exc:
+        results["stages"][stage_key] = {
+            "status": "failed",
+            "error": str(exc),
+            "exception_type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+            "duration_sec": round(time.time() - t0, 2),
+        }
+        raise
+
+
 def run_full_pipeline():
     """Execute the complete data pipeline."""
     logger.info("=" * 70)
@@ -28,110 +62,110 @@ def run_full_pipeline():
     results = {
         "pipeline_run_id": datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
         "started_at": datetime.utcnow().isoformat(),
+        "status": "running",
         "stages": {},
     }
+    report_path = _write_pipeline_report(results)
 
-    # Stage 1: Generate synthetic data
-    logger.info("\nStage 1: Generating synthetic tenant documents...")
-    t0 = time.time()
-    gen_results = save_synthetic_documents()
-    results["stages"]["1_synthetic_generation"] = {
-        "status": "success",
-        "documents": gen_results,
-        "duration_sec": round(time.time() - t0, 2),
-    }
+    try:
+        _run_stage(
+            results,
+            "1_synthetic_generation",
+            "Stage 1: Generating synthetic tenant documents...",
+            save_synthetic_documents,
+            lambda gen_results: {"documents": gen_results},
+        )
+        _run_stage(
+            results,
+            "2_ingestion",
+            "Stage 2: Ingesting documents...",
+            ingest_all_tenants,
+            lambda ingest_results: {"documents_per_tenant": ingest_results},
+        )
+        _run_stage(
+            results,
+            "3_pii_redaction",
+            "Stage 3: PII detection and redaction...",
+            process_all_tenants_pii,
+            lambda pii_results: {
+                "pii_per_tenant": {
+                    tid: r.get("total_pii_found", 0) if isinstance(r, dict) else 0
+                    for tid, r in pii_results.items()
+                },
+                "compliance_status": {
+                    tid: r.get("compliance_status", "unknown") if isinstance(r, dict) else "unknown"
+                    for tid, r in pii_results.items()
+                },
+            },
+        )
+        _run_stage(
+            results,
+            "4_chunking",
+            "Stage 4: Chunking documents...",
+            chunk_all_tenants,
+            lambda chunk_results: {"chunks_per_tenant": chunk_results},
+        )
+        _run_stage(
+            results,
+            "5_quality_scoring",
+            "Stage 5: Data quality assessment...",
+            generate_all_reports,
+            lambda quality_results: {
+                "quality_status": {
+                    tid: r.get("overall_status", "UNKNOWN")
+                    for tid, r in quality_results.items()
+                },
+                "overall_scores": {
+                    tid: r.get("scores", {}).get("overall", 0)
+                    for tid, r in quality_results.items()
+                },
+            },
+        )
+        _run_stage(
+            results,
+            "6_sft_dataset",
+            "Stage 6: Building SFT datasets...",
+            build_all_sft_datasets,
+            lambda sft_results: {"examples_per_tenant": sft_results},
+        )
+        _run_stage(
+            results,
+            "7_dpo_dataset",
+            "Stage 7: Building DPO preference datasets...",
+            build_all_dpo_datasets,
+            lambda dpo_results: {"pairs_per_tenant": dpo_results},
+        )
 
-    # Stage 2: Ingest documents
-    logger.info("\nStage 2: Ingesting documents...")
-    t0 = time.time()
-    ingest_results = ingest_all_tenants()
-    results["stages"]["2_ingestion"] = {
-        "status": "success",
-        "documents_per_tenant": ingest_results,
-        "duration_sec": round(time.time() - t0, 2),
-    }
+        results["status"] = "success"
+        results["completed_at"] = datetime.utcnow().isoformat()
+        results["total_duration_sec"] = round(time.time() - pipeline_start, 2)
+        report_path = _write_pipeline_report(results)
 
-    # Stage 3: PII detection and redaction
-    logger.info("\nStage 3: PII detection and redaction...")
-    t0 = time.time()
-    pii_results = process_all_tenants_pii()
-    results["stages"]["3_pii_redaction"] = {
-        "status": "success",
-        "pii_per_tenant": {
-            tid: r.get("total_pii_found", 0) if isinstance(r, dict) else 0
-            for tid, r in pii_results.items()
-        },
-        "duration_sec": round(time.time() - t0, 2),
-    }
+        logger.info("\n" + "=" * 70)
+        logger.info("PIPELINE COMPLETE")
+        logger.info("=" * 70)
+        logger.info(f"Total duration: {results['total_duration_sec']}s")
+        for stage_name, stage_data in results["stages"].items():
+            logger.info(f"  {stage_name}: {stage_data['status']} ({stage_data['duration_sec']}s)")
+        logger.info(f"Report saved: {report_path}")
 
-    # Stage 4: Chunking
-    logger.info("\nStage 4: Chunking documents...")
-    t0 = time.time()
-    chunk_results = chunk_all_tenants()
-    results["stages"]["4_chunking"] = {
-        "status": "success",
-        "chunks_per_tenant": chunk_results,
-        "duration_sec": round(time.time() - t0, 2),
-    }
-
-    # Stage 5: Data quality scoring
-    logger.info("\nStage 5: Data quality assessment...")
-    t0 = time.time()
-    quality_results = generate_all_reports()
-    results["stages"]["5_quality_scoring"] = {
-        "status": "success",
-        "quality_status": {
-            tid: r.get("overall_status", "UNKNOWN")
-            for tid, r in quality_results.items()
-        },
-        "overall_scores": {
-            tid: r.get("scores", {}).get("overall", 0)
-            for tid, r in quality_results.items()
-        },
-        "duration_sec": round(time.time() - t0, 2),
-    }
-
-    # Stage 6: SFT dataset creation
-    logger.info("\nStage 6: Building SFT datasets...")
-    t0 = time.time()
-    sft_results = build_all_sft_datasets()
-    results["stages"]["6_sft_dataset"] = {
-        "status": "success",
-        "examples_per_tenant": sft_results,
-        "duration_sec": round(time.time() - t0, 2),
-    }
-
-    # Stage 7: DPO dataset creation
-    logger.info("\nStage 7: Building DPO preference datasets...")
-    t0 = time.time()
-    dpo_results = build_all_dpo_datasets()
-    results["stages"]["7_dpo_dataset"] = {
-        "status": "success",
-        "pairs_per_tenant": dpo_results,
-        "duration_sec": round(time.time() - t0, 2),
-    }
-
-    # Pipeline summary
-    total_duration = round(time.time() - pipeline_start, 2)
-    results["completed_at"] = datetime.utcnow().isoformat()
-    results["total_duration_sec"] = total_duration
-
-    # Save pipeline results
-    report_dir = Path("evaluation/reports")
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / f"pipeline_run_{results['pipeline_run_id']}.json"
-    report_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
-
-    # Print summary
-    logger.info("\n" + "=" * 70)
-    logger.info("PIPELINE COMPLETE")
-    logger.info("=" * 70)
-    logger.info(f"Total duration: {total_duration}s")
-    for stage_name, stage_data in results["stages"].items():
-        logger.info(f"  {stage_name}: {stage_data['status']} ({stage_data['duration_sec']}s)")
-    logger.info(f"Report saved: {report_path}")
-
-    return results
+        return results
+    except Exception as exc:
+        results["status"] = "failed"
+        results["failed_stage"] = next(
+            (name for name, data in results["stages"].items() if data["status"] == "failed"),
+            "unknown",
+        )
+        results["completed_at"] = datetime.utcnow().isoformat()
+        results["total_duration_sec"] = round(time.time() - pipeline_start, 2)
+        report_path = _write_pipeline_report(results)
+        logger.exception(
+            f"Pipeline failed at {results['failed_stage']}. Partial report saved: {report_path}"
+        )
+        raise RuntimeError(
+            f"Pipeline failed at {results['failed_stage']}. "
+            f"See {report_path} for partial progress and traceback."
+        ) from exc
 
 
 if __name__ == "__main__":

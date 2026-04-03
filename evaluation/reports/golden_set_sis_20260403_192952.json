@@ -1,0 +1,426 @@
+{
+  "report_id": "20260403_192952",
+  "tenant_id": "sis",
+  "model_version": "stub_baseline",
+  "eval_type": "golden_set",
+  "timestamp": "2026-04-03T19:29:52.987202",
+  "total_tests": 20,
+  "passed": 0,
+  "failed": 20,
+  "pass_rate": 0.0,
+  "scores": {
+    "avg_keyword_overlap": 0.125,
+    "avg_semantic_similarity": 0.112,
+    "pass_rate": 0.0,
+    "category_breakdown": {
+      "enrollment": {
+        "total": 3,
+        "passed": 0,
+        "avg_score": 0.104,
+        "pass_rate": 0.0
+      },
+      "attendance": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.142,
+        "pass_rate": 0.0
+      },
+      "grading": {
+        "total": 3,
+        "passed": 0,
+        "avg_score": 0.203,
+        "pass_rate": 0.0
+      },
+      "ferpa": {
+        "total": 3,
+        "passed": 0,
+        "avg_score": 0.08,
+        "pass_rate": 0.0
+      },
+      "transcripts": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.099,
+        "pass_rate": 0.0
+      },
+      "accommodations": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.148,
+        "pass_rate": 0.0
+      },
+      "discipline": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.097,
+        "pass_rate": 0.0
+      },
+      "transfers": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.079,
+        "pass_rate": 0.0
+      },
+      "records": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.12,
+        "pass_rate": 0.0
+      },
+      "parent_communication": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.127,
+        "pass_rate": 0.0
+      },
+      "cross_domain": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.0,
+        "pass_rate": 0.0
+      }
+    }
+  },
+  "results": [
+    {
+      "test_id": "sis_001",
+      "category": "enrollment",
+      "question": "What documents are required for a new student to enroll?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.102,
+        "length_adequacy": 0.288,
+        "combined": 0.098
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_002",
+      "category": "enrollment",
+      "question": "Can enrollment be denied to a homeless student who lacks documentation?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.216,
+        "length_adequacy": 0.378,
+        "combined": 0.162
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_003",
+      "category": "attendance",
+      "question": "What happens after a student accumulates 10 unexcused absences?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.095,
+        "length_adequacy": 0.28,
+        "combined": 0.094
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_004",
+      "category": "attendance",
+      "question": "How long must teachers wait before recording attendance?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.199,
+        "length_adequacy": 0.554,
+        "combined": 0.191
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_005",
+      "category": "grading",
+      "question": "What is the GPA weight bonus for AP courses?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.033,
+        "length_adequacy": 0.962,
+        "combined": 0.205
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_006",
+      "category": "grading",
+      "question": "What happens to an incomplete grade that is not resolved?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.5,
+        "semantic_similarity": 0.11,
+        "length_adequacy": 0.354,
+        "combined": 0.315
+      },
+      "flags": [
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_007",
+      "category": "ferpa",
+      "question": "Who can access student education records without consent under FERPA?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.012,
+        "length_adequacy": 0.0,
+        "combined": 0.005
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_008",
+      "category": "ferpa",
+      "question": "What SIS security controls are required for FERPA compliance?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.382,
+        "length_adequacy": 0.0,
+        "combined": 0.153
+      },
+      "flags": [
+        "missing_key_elements",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_009",
+      "category": "transcripts",
+      "question": "How long does it take to process a transcript request for alumni?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.0,
+        "length_adequacy": 0.495,
+        "combined": 0.099
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.01
+    },
+    {
+      "test_id": "sis_010",
+      "category": "accommodations",
+      "question": "Within what timeframe must the initial evaluation for student accommodations be completed?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.101,
+        "length_adequacy": 0.537,
+        "combined": 0.148
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_011",
+      "category": "discipline",
+      "question": "What protections exist for special education students facing suspension?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.14,
+        "length_adequacy": 0.205,
+        "combined": 0.097
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_012",
+      "category": "transfers",
+      "question": "How are grades calculated for a student who transfers mid-year?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.084,
+        "length_adequacy": 0.23,
+        "combined": 0.079
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_013",
+      "category": "records",
+      "question": "What access level do school nurses have in the SIS?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.076,
+        "length_adequacy": 0.421,
+        "combined": 0.115
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_014",
+      "category": "parent_communication",
+      "question": "Do non-custodial parents retain rights to access student records?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.12,
+        "length_adequacy": 0.395,
+        "combined": 0.127
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_015",
+      "category": "records",
+      "question": "How long are temporary student records retained after a student exits the district?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.108,
+        "length_adequacy": 0.411,
+        "combined": 0.126
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_016",
+      "category": "cross_domain",
+      "question": "What is the procedure for handling a critical quality defect on the assembly line?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 1.0,
+        "semantic_similarity": 0.082,
+        "length_adequacy": 0.242,
+        "combined": 0.0
+      },
+      "flags": [
+        "failed_out_of_domain_refusal"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_017",
+      "category": "cross_domain",
+      "question": "What is the CAPA process for ISO compliance?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 1.0,
+        "semantic_similarity": 0.154,
+        "length_adequacy": 0.276,
+        "combined": 0.0
+      },
+      "flags": [
+        "failed_out_of_domain_refusal"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_018",
+      "category": "enrollment",
+      "question": "What is the process for enrolling a student with an IEP who is also an English Language Learner?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.131,
+        "length_adequacy": 0.0,
+        "combined": 0.052
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_019",
+      "category": "grading",
+      "question": "What are the grade category weights for calculating student grades?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.0,
+        "length_adequacy": 0.44,
+        "combined": 0.088
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "sis_020",
+      "category": "ferpa",
+      "question": "Can parents opt out of directory information disclosure, and what does directory information include",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.096,
+        "length_adequacy": 0.222,
+        "combined": 0.083
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    }
+  ],
+  "summary": "SIS evaluation: 0/20 passed (0.0%), avg keyword=0.12, avg semantic=0.11"
+}

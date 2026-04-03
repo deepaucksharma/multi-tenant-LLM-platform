@@ -1,0 +1,77 @@
+{
+  "tenant_id": "sis",
+  "domain": "education",
+  "generated_at": "2026-04-02T21:31:13.095057",
+  "scores": {
+    "duplication": 1.0,
+    "topic_coverage": 1.0,
+    "topic_balance": 0.5,
+    "pii_clean": 0.1499999999999999,
+    "completeness": 1.0,
+    "chunk_quality": 1.0,
+    "overall": 0.78
+  },
+  "details": {
+    "document_count": 15,
+    "total_words": 4775,
+    "avg_doc_length": 318.3333333333333,
+    "chunk_count": 40,
+    "avg_chunk_length": 948.8,
+    "duplicate_chunks": 0,
+    "duplication_rate": 0.0,
+    "expected_topics": [
+      "accommodations",
+      "attendance",
+      "disciplinary",
+      "enrollment",
+      "ferpa_compliance",
+      "grading",
+      "parent_communication",
+      "records_management",
+      "transcripts",
+      "transfer"
+    ],
+    "covered_topics": [
+      "accommodations",
+      "attendance",
+      "disciplinary",
+      "enrollment",
+      "ferpa_compliance",
+      "grading",
+      "parent_communication",
+      "records_management",
+      "transcripts",
+      "transfer"
+    ],
+    "missing_topics": [],
+    "chunks_per_topic": {
+      "accommodations": 6,
+      "attendance": 4,
+      "disciplinary": 5,
+      "enrollment": 5,
+      "ferpa_compliance": 3,
+      "grading": 3,
+      "parent_communication": 3,
+      "records_management": 3,
+      "transcripts": 5,
+      "transfer": 3
+    },
+    "pii_instances_detected": 17,
+    "pii_by_type": {
+      "EMAIL": 9,
+      "PHONE": 8
+    },
+    "short_chunks": 0,
+    "bias_keyword_hits": 7,
+    "bias_keywords_found": [
+      "disability",
+      "every student",
+      "never",
+      "always"
+    ]
+  },
+  "flags": [
+    "PII detected: 17 instances (redacted)"
+  ],
+  "overall_status": "APPROVED"
+}

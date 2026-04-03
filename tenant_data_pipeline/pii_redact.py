@@ -6,7 +6,7 @@ Critical for FERPA compliance (SIS tenant) and general data governance.
 import re
 import json
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -16,11 +16,12 @@ from tenant_data_pipeline.config import TENANTS
 
 try:
     from presidio_analyzer import AnalyzerEngine
-    from presidio_anonymizer import AnonymizerEngine
     PRESIDIO_AVAILABLE = True
 except ImportError:
     PRESIDIO_AVAILABLE = False
     logger.info("Presidio not available, using regex-only PII detection")
+
+_PRESIDIO_ANALYZER: Optional["AnalyzerEngine"] = None
 
 
 @dataclass
@@ -57,6 +58,19 @@ REDACTION_MAP = {
     "LOCATION": "[LOCATION_REDACTED]",
 }
 
+PRESIDIO_ENTITY_MAP = {
+    "PERSON": "PERSON",
+    "EMAIL_ADDRESS": "EMAIL",
+    "PHONE_NUMBER": "PHONE",
+    "US_SSN": "SSN",
+    "CREDIT_CARD": "CREDIT_CARD",
+    "IP_ADDRESS": "IP_ADDRESS",
+    "DATE_TIME": "DATE_OF_BIRTH",
+    "LOCATION": "LOCATION",
+}
+
+PRESIDIO_REQUIRED_TENANTS = {"sis"}
+
 
 def detect_pii_regex(text: str, doc_id: str, tenant_id: str) -> List[PIIFinding]:
     """Detect PII using regex patterns."""
@@ -81,8 +95,11 @@ def detect_pii_presidio(text: str, doc_id: str, tenant_id: str) -> List[PIIFindi
     if not PRESIDIO_AVAILABLE:
         return []
 
-    analyzer = AnalyzerEngine()
-    results = analyzer.analyze(
+    global _PRESIDIO_ANALYZER
+    if _PRESIDIO_ANALYZER is None:
+        _PRESIDIO_ANALYZER = AnalyzerEngine()
+
+    results = _PRESIDIO_ANALYZER.analyze(
         text=text,
         entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN",
                   "CREDIT_CARD", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
@@ -91,7 +108,7 @@ def detect_pii_presidio(text: str, doc_id: str, tenant_id: str) -> List[PIIFindi
 
     findings = []
     for result in results:
-        pii_type = result.entity_type
+        pii_type = PRESIDIO_ENTITY_MAP.get(result.entity_type, result.entity_type)
         findings.append(PIIFinding(
             doc_id=doc_id,
             tenant_id=tenant_id,
@@ -114,14 +131,46 @@ def redact_text(text: str, findings: List[PIIFinding]) -> str:
     return redacted
 
 
+def get_pii_runtime_status(tenant_id: str) -> Dict[str, object]:
+    """Describe the active PII detection engines and compliance caveats."""
+    detection_engines = ["regex"]
+    warnings: List[str] = []
+    compliance_status = "ok"
+
+    if PRESIDIO_AVAILABLE:
+        detection_engines.append("presidio")
+    elif tenant_id in PRESIDIO_REQUIRED_TENANTS:
+        compliance_status = "degraded"
+        warnings.append(
+            "Presidio is unavailable; only regex PII detection is active. "
+            "NLP-based entities such as names and locations will be missed."
+        )
+
+    return {
+        "presidio_available": PRESIDIO_AVAILABLE,
+        "detection_engines": detection_engines,
+        "compliance_status": compliance_status,
+        "warnings": warnings,
+    }
+
+
 def process_tenant_pii(tenant_id: str) -> Dict:
     """Run PII detection and redaction for all documents of a tenant."""
     config = TENANTS[tenant_id]
     processed_path = config.processed_dir / "ingested_documents.json"
+    runtime_status = get_pii_runtime_status(tenant_id)
+
+    for warning in runtime_status["warnings"]:
+        logger.warning(f"[{tenant_id}] {warning}")
 
     if not processed_path.exists():
         logger.warning(f"No ingested documents found for {tenant_id}")
-        return {"tenant_id": tenant_id, "documents_processed": 0, "total_pii_found": 0}
+        return {
+            "tenant_id": tenant_id,
+            "documents_processed": 0,
+            "total_pii_found": 0,
+            **runtime_status,
+        }
 
     with open(processed_path) as f:
         documents = json.load(f)
@@ -158,6 +207,7 @@ def process_tenant_pii(tenant_id: str) -> Dict:
         "total_pii_found": len(all_findings),
         "pii_by_type": _count_by_type(all_findings),
         "findings": [asdict(f) for f in all_findings],
+        **runtime_status,
     }
     report_path = config.processed_dir / "pii_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -170,18 +220,22 @@ def process_tenant_pii(tenant_id: str) -> Dict:
 
 
 def _deduplicate_findings(findings: List[PIIFinding]) -> List[PIIFinding]:
-    """Remove overlapping findings, keeping higher confidence."""
+    """Remove overlapping findings, preferring higher-confidence, wider spans."""
     if not findings:
         return findings
-    sorted_f = sorted(findings, key=lambda f: (f.start, -f.confidence))
-    result = [sorted_f[0]]
-    for f in sorted_f[1:]:
-        last = result[-1]
-        if f.start >= last.end:
-            result.append(f)
-        elif f.confidence > last.confidence:
-            result[-1] = f
-    return result
+    ranked = sorted(
+        findings,
+        key=lambda f: (-f.confidence, -(f.end - f.start), f.start, f.end),
+    )
+    selected: List[PIIFinding] = []
+    for finding in ranked:
+        overlaps = any(
+            not (finding.end <= existing.start or finding.start >= existing.end)
+            for existing in selected
+        )
+        if not overlaps:
+            selected.append(finding)
+    return sorted(selected, key=lambda f: (f.start, f.end))
 
 
 def _count_by_type(findings: List[PIIFinding]) -> Dict[str, int]:

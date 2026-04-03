@@ -1,0 +1,71 @@
+{
+  "tenant_id": "mfg",
+  "domain": "manufacturing",
+  "generated_at": "2026-04-02T21:31:13.096284",
+  "scores": {
+    "duplication": 1.0,
+    "topic_coverage": 1.0,
+    "topic_balance": 0.43,
+    "pii_clean": 1.0,
+    "completeness": 1.0,
+    "chunk_quality": 1.0,
+    "overall": 0.9
+  },
+  "details": {
+    "document_count": 15,
+    "total_words": 5790,
+    "avg_doc_length": 386.0,
+    "chunk_count": 49,
+    "avg_chunk_length": 946.265306122449,
+    "duplicate_chunks": 0,
+    "duplication_rate": 0.0,
+    "expected_topics": [
+      "capa",
+      "defect_classification",
+      "inventory_management",
+      "iso_documentation",
+      "maintenance",
+      "production_scheduling",
+      "quality_control",
+      "regulatory_compliance",
+      "safety_protocols",
+      "standard_operating_procedures"
+    ],
+    "covered_topics": [
+      "capa",
+      "defect_classification",
+      "inventory_management",
+      "iso_documentation",
+      "maintenance",
+      "production_scheduling",
+      "quality_control",
+      "regulatory_compliance",
+      "safety_protocols",
+      "standard_operating_procedures"
+    ],
+    "missing_topics": [],
+    "chunks_per_topic": {
+      "capa": 7,
+      "defect_classification": 4,
+      "inventory_management": 6,
+      "iso_documentation": 4,
+      "maintenance": 3,
+      "production_scheduling": 6,
+      "quality_control": 6,
+      "regulatory_compliance": 3,
+      "safety_protocols": 7,
+      "standard_operating_procedures": 3
+    },
+    "pii_instances_detected": 0,
+    "pii_by_type": {},
+    "short_chunks": 0,
+    "bias_keyword_hits": 6,
+    "bias_keywords_found": [
+      "poor",
+      "never",
+      "always"
+    ]
+  },
+  "flags": [],
+  "overall_status": "APPROVED"
+}

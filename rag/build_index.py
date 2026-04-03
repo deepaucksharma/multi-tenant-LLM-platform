@@ -5,18 +5,18 @@ Each tenant gets its own Chroma collection with metadata.
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List
 
-import chromadb
 from loguru import logger
 
 from rag.config import RAG_CONFIG
-from rag.embeddings import embed_texts, get_embedding_dimension
 from tenant_data_pipeline.config import TENANTS
 
 
-def get_chroma_client() -> chromadb.ClientAPI:
+def get_chroma_client() -> Any:
     """Get persistent Chroma client."""
+    import chromadb
+
     persist_dir = RAG_CONFIG.chroma_persist_dir
     Path(persist_dir).mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=persist_dir)
@@ -26,6 +26,20 @@ def get_chroma_client() -> chromadb.ClientAPI:
 def get_collection_name(tenant_id: str) -> str:
     """Generate collection name for a tenant."""
     return f"tenant_{tenant_id}_docs"
+
+
+def _make_staging_collection_name(tenant_id: str) -> str:
+    """Create a unique staging collection name for atomic swaps."""
+    return f"{get_collection_name(tenant_id)}_staging_{int(time.time() * 1000)}"
+
+
+def _delete_collection_if_exists(client: Any, collection_name: str) -> None:
+    """Delete a collection if it exists."""
+    try:
+        client.delete_collection(collection_name)
+        logger.info(f"Deleted collection: {collection_name}")
+    except Exception:
+        pass
 
 
 def build_tenant_index(tenant_id: str, force_rebuild: bool = False) -> Dict:
@@ -46,27 +60,14 @@ def build_tenant_index(tenant_id: str, force_rebuild: bool = False) -> Dict:
 
     client = get_chroma_client()
     collection_name = get_collection_name(tenant_id)
+    staging_name = _make_staging_collection_name(tenant_id)
 
-    # Delete existing collection if force rebuild
-    if force_rebuild:
-        try:
-            client.delete_collection(collection_name)
-            logger.info(f"[{tenant_id}] Deleted existing collection: {collection_name}")
-        except Exception:
-            pass
+    existing_count = 0
+    try:
+        existing_count = client.get_collection(collection_name).count()
+    except Exception:
+        existing_count = 0
 
-    # Create or get collection
-    collection = client.get_or_create_collection(
-        name=collection_name,
-        metadata={
-            "tenant_id": tenant_id,
-            "domain": config.domain,
-            "hnsw:space": "cosine",
-        },
-    )
-
-    # Check if already populated
-    existing_count = collection.count()
     if existing_count > 0 and not force_rebuild:
         logger.info(
             f"[{tenant_id}] Collection already has {existing_count} documents. "
@@ -75,8 +76,23 @@ def build_tenant_index(tenant_id: str, force_rebuild: bool = False) -> Dict:
         return {
             "tenant_id": tenant_id,
             "status": "exists",
+            "collection_name": collection_name,
             "document_count": existing_count,
         }
+
+    if force_rebuild:
+        _delete_collection_if_exists(client, collection_name)
+
+    _delete_collection_if_exists(client, staging_name)
+
+    collection = client.get_or_create_collection(
+        name=staging_name,
+        metadata={
+            "tenant_id": tenant_id,
+            "domain": config.domain,
+            "hnsw:space": "cosine",
+        },
+    )
 
     # Prepare data for indexing
     texts = [chunk["content"] for chunk in chunks]
@@ -99,23 +115,36 @@ def build_tenant_index(tenant_id: str, force_rebuild: bool = False) -> Dict:
     # Generate embeddings
     logger.info(f"[{tenant_id}] Embedding {len(texts)} chunks...")
     t0 = time.time()
+    from rag.embeddings import embed_texts
+
     embeddings = embed_texts(texts, show_progress=True)
     embed_time = round(time.time() - t0, 2)
     logger.info(f"[{tenant_id}] Embedding complete in {embed_time}s")
 
-    # Index in batches (Chroma has limits on batch size)
-    batch_size = 100
-    for i in range(0, len(texts), batch_size):
-        end = min(i + batch_size, len(texts))
-        collection.add(
-            ids=ids[i:end],
-            documents=texts[i:end],
-            embeddings=embeddings[i:end].tolist(),
-            metadatas=metadatas[i:end],
-        )
+    try:
+        # Index in batches (Chroma has limits on batch size)
+        batch_size = 100
+        for i in range(0, len(texts), batch_size):
+            end = min(i + batch_size, len(texts))
+            collection.add(
+                ids=ids[i:end],
+                documents=texts[i:end],
+                embeddings=embeddings[i:end].tolist(),
+                metadatas=metadatas[i:end],
+            )
 
-    final_count = collection.count()
-    logger.info(f"[{tenant_id}] Indexed {final_count} chunks into collection '{collection_name}'")
+        final_count = collection.count()
+        if final_count != len(texts):
+            raise RuntimeError(
+                f"Staging collection count mismatch: expected {len(texts)}, got {final_count}"
+            )
+
+        _delete_collection_if_exists(client, collection_name)
+        collection.modify(name=collection_name)
+        logger.info(f"[{tenant_id}] Indexed {final_count} chunks into collection '{collection_name}'")
+    except Exception:
+        _delete_collection_if_exists(client, staging_name)
+        raise
 
     return {
         "tenant_id": tenant_id,
@@ -131,7 +160,15 @@ def build_all_indexes(force_rebuild: bool = False) -> Dict:
     """Build indexes for all tenants."""
     results = {}
     for tenant_id in TENANTS:
-        results[tenant_id] = build_tenant_index(tenant_id, force_rebuild=force_rebuild)
+        try:
+            results[tenant_id] = build_tenant_index(tenant_id, force_rebuild=force_rebuild)
+        except Exception as exc:
+            logger.exception(f"[{tenant_id}] Index build failed")
+            results[tenant_id] = {
+                "tenant_id": tenant_id,
+                "status": "error",
+                "reason": str(exc),
+            }
     return results
 
 

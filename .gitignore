@@ -21,8 +21,25 @@ data/raw/
 data/sis/
 data/mfg/
 
-# Models (large binary artifacts)
-models/
+# Models — binary weights & base downloads are too large for GitHub.
+# Push with: python -m training.push_to_hub --all --weights
+# Only metadata/config JSONs are tracked in git.
+models/**/*.safetensors
+models/**/*.bin
+models/**/*.pt
+models/**/*.gguf
+models/**/*.ggml
+models/**/checkpoint-*/
+models/base/
+models/merged/
+models/registry.json
+# Allow adapter metadata so training results are recorded
+!models/adapters/**/adapter_config.json
+!models/adapters/**/training_metadata.json
+!models/adapters/**/tokenizer_config.json
+!models/adapters/**/tokenizer.json
+!models/adapters/**/special_tokens_map.json
+!models/adapters/**/generation_config.json
 
 # MLflow
 mlruns/
@@ -44,8 +61,9 @@ mobile_app/build/
 mobile_app/.flutter-plugins
 mobile_app/.flutter-plugins-dependencies
 
-# Evaluation reports (generated)
-evaluation/reports/
+# Evaluation reports — keep JSON results, exclude bulky HTML renders
+# evaluation/reports/*.json are small and valuable as a historical record
+evaluation/reports/*.html
 
 # OS
 .DS_Store

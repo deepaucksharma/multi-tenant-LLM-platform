@@ -1,0 +1,429 @@
+{
+  "report_id": "20260403_192953",
+  "tenant_id": "mfg",
+  "model_version": "stub_baseline",
+  "eval_type": "golden_set",
+  "timestamp": "2026-04-03T19:29:53.968159",
+  "total_tests": 20,
+  "passed": 0,
+  "failed": 20,
+  "pass_rate": 0.0,
+  "scores": {
+    "avg_keyword_overlap": 0.1,
+    "avg_semantic_similarity": 0.121,
+    "pass_rate": 0.0,
+    "category_breakdown": {
+      "sop": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.076,
+        "pass_rate": 0.0
+      },
+      "defects": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.096,
+        "pass_rate": 0.0
+      },
+      "capa": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.101,
+        "pass_rate": 0.0
+      },
+      "maintenance": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.098,
+        "pass_rate": 0.0
+      },
+      "safety": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.145,
+        "pass_rate": 0.0
+      },
+      "quality": {
+        "total": 3,
+        "passed": 0,
+        "avg_score": 0.148,
+        "pass_rate": 0.0
+      },
+      "iso": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.15,
+        "pass_rate": 0.0
+      },
+      "scheduling": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.138,
+        "pass_rate": 0.0
+      },
+      "regulatory": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.079,
+        "pass_rate": 0.0
+      },
+      "inventory": {
+        "total": 1,
+        "passed": 0,
+        "avg_score": 0.078,
+        "pass_rate": 0.0
+      },
+      "cross_domain": {
+        "total": 2,
+        "passed": 0,
+        "avg_score": 0.0,
+        "pass_rate": 0.0
+      }
+    }
+  },
+  "results": [
+    {
+      "test_id": "mfg_001",
+      "category": "sop",
+      "question": "What is the correct startup sequence for the assembly line?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.068,
+        "length_adequacy": 0.0,
+        "combined": 0.027
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_002",
+      "category": "sop",
+      "question": "What should an operator do if a pre-startup check fails?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.173,
+        "length_adequacy": 0.28,
+        "combined": 0.125
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_003",
+      "category": "defects",
+      "question": "What are the three defect severity levels and what action does each require?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.123,
+        "length_adequacy": 0.0,
+        "combined": 0.049
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_004",
+      "category": "defects",
+      "question": "Within what timeframe must the Quality Manager be notified of a Class 1 defect?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.154,
+        "length_adequacy": 0.402,
+        "combined": 0.142
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_005",
+      "category": "capa",
+      "question": "What are the seven steps of the CAPA process?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.176,
+        "length_adequacy": 0.0,
+        "combined": 0.07
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_006",
+      "category": "capa",
+      "question": "What root cause analysis methodologies are approved?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.118,
+        "length_adequacy": 0.425,
+        "combined": 0.132
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_007",
+      "category": "maintenance",
+      "question": "What is the lockout/tagout procedure?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.093,
+        "length_adequacy": 0.0,
+        "combined": 0.037
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity",
+        "too_short"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_008",
+      "category": "maintenance",
+      "question": "What are the maintenance priority response times?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.21,
+        "length_adequacy": 0.378,
+        "combined": 0.159
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_009",
+      "category": "safety",
+      "question": "What is the emergency procedure for a chemical spill?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.217,
+        "length_adequacy": 0.252,
+        "combined": 0.137
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_010",
+      "category": "safety",
+      "question": "What is the maximum weight an employee can lift without mechanical assistance?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.0,
+        "length_adequacy": 0.761,
+        "combined": 0.152
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_011",
+      "category": "quality",
+      "question": "When is First Article Inspection required?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.207,
+        "length_adequacy": 0.347,
+        "combined": 0.152
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_012",
+      "category": "quality",
+      "question": "What does a red calibration sticker on a measuring instrument mean?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.097,
+        "length_adequacy": 0.302,
+        "combined": 0.099
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.01
+    },
+    {
+      "test_id": "mfg_013",
+      "category": "iso",
+      "question": "What is the document numbering format for the QMS?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.175,
+        "length_adequacy": 0.622,
+        "combined": 0.194
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_014",
+      "category": "iso",
+      "question": "How is the Risk Priority Number calculated in FMEA?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.081,
+        "length_adequacy": 0.367,
+        "combined": 0.106
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_015",
+      "category": "scheduling",
+      "question": "What is the target changeover time for same product family?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.021,
+        "length_adequacy": 0.646,
+        "combined": 0.138
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_016",
+      "category": "regulatory",
+      "question": "What are the record retention requirements for quality and safety records?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.086,
+        "length_adequacy": 0.221,
+        "combined": 0.079
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.01
+    },
+    {
+      "test_id": "mfg_017",
+      "category": "inventory",
+      "question": "What is the cycle count schedule based on ABC classification?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.061,
+        "length_adequacy": 0.266,
+        "combined": 0.078
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_018",
+      "category": "cross_domain",
+      "question": "What is the FERPA policy on student record disclosure?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 1.0,
+        "semantic_similarity": 0.122,
+        "length_adequacy": 0.238,
+        "combined": 0.0
+      },
+      "flags": [
+        "failed_out_of_domain_refusal"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_019",
+      "category": "cross_domain",
+      "question": "How do I enroll a new student in the school?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 1.0,
+        "semantic_similarity": 0.109,
+        "length_adequacy": 0.309,
+        "combined": 0.0
+      },
+      "flags": [
+        "failed_out_of_domain_refusal"
+      ],
+      "latency_ms": 0.0
+    },
+    {
+      "test_id": "mfg_020",
+      "category": "quality",
+      "question": "How quickly must forward and reverse traceability be achievable for a recall scenario?",
+      "passed": false,
+      "scores": {
+        "keyword_overlap": 0.0,
+        "semantic_similarity": 0.124,
+        "length_adequacy": 0.708,
+        "combined": 0.191
+      },
+      "flags": [
+        "missing_key_elements",
+        "low_semantic_similarity"
+      ],
+      "latency_ms": 0.0
+    }
+  ],
+  "summary": "MFG evaluation: 0/20 passed (0.0%), avg keyword=0.10, avg semantic=0.12"
+}
