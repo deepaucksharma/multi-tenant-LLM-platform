@@ -15,8 +15,10 @@ from typing import Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 from loguru import logger
 from dotenv import load_dotenv
@@ -74,6 +76,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_prefix_middleware(request: Request, call_next):
+    """Strip /api prefix so the bundled Next.js UI's /api/* calls resolve correctly."""
+    if request.scope["path"].startswith("/api/"):
+        request.scope["path"] = request.scope["path"][4:]  # /api/chat → /chat
+        request.scope["raw_path"] = request.scope["path"].encode()
+    return await call_next(request)
+
+
+# Mount static Next.js export when running in Docker/HF Spaces
+_static_dir = os.path.join(os.path.dirname(__file__), "..", "web_app", "out")
+if os.path.isdir(_static_dir):
+    app.mount("/ui", StaticFiles(directory=_static_dir, html=True), name="ui")
+    logger.info(f"Serving Next.js UI from {_static_dir} at /ui")
 
 
 # ============================================================

@@ -55,16 +55,32 @@ def resolve_device() -> str:
     """
     Resolve the training/inference device from env and torch runtime.
 
-    DEVICE=auto|cuda|cpu is supported. ROCm builds still use "cuda" through torch.
+    DEVICE=auto|cuda|cpu|dml is supported. ROCm builds still use "cuda" through torch.
     """
     requested = os.getenv("DEVICE", "auto").strip().lower()
     if requested == "cpu":
+        return "cpu"
+    if requested == "dml":
+        try:
+            import torch_directml
+            if torch_directml.is_available():
+                return "dml"
+        except ImportError:
+            pass
+        logger.warning("DEVICE=dml requested but torch-directml is not available; falling back to CPU")
         return "cpu"
     if requested == "cuda":
         if torch.cuda.is_available():
             return "cuda"
         logger.warning("DEVICE=cuda requested but no CUDA/ROCm device is available; falling back to CPU")
         return "cpu"
+        
+    try:
+        import torch_directml
+        if torch_directml.is_available():
+            return "dml"
+    except ImportError:
+        pass
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -130,7 +146,7 @@ def get_training_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "use_bnb_4bit": use_bnb,
         "torch_dtype": dtype,
         "optim": get_effective_optimizer(config, prefer_bnb=use_bnb),
-        "fp16": device == "cuda" and dtype == torch.float16,
+        "fp16": device in ("cuda", "dml") and dtype == torch.float16,
         "bf16": False,
     }
 
@@ -221,6 +237,9 @@ def load_base_model_and_tokenizer(
         device = runtime["device"]
         if device == "cuda":
             load_kwargs["device_map"] = {"": "cuda:0"}
+        elif device == "dml":
+            import torch_directml
+            load_kwargs["device_map"] = {"": torch_directml.device()}
         else:
             load_kwargs["device_map"] = {"": "cpu"}
             load_kwargs["low_cpu_mem_usage"] = True
@@ -353,6 +372,20 @@ def load_adapter(
 
 def get_gpu_memory_info() -> Dict[str, float]:
     """Get current GPU memory usage."""
+    try:
+        import torch_directml
+        if os.getenv("DEVICE", "auto").strip().lower() == "dml" and torch_directml.is_available():
+            return {
+                "available": True, 
+                "device": "DirectML Adapter",
+                "total_gb": 0.0,
+                "allocated_gb": 0.0,
+                "reserved_gb": 0.0,
+                "free_gb": 0.0,
+            }
+    except ImportError:
+        pass
+
     if not torch.cuda.is_available():
         return {"available": False}
 

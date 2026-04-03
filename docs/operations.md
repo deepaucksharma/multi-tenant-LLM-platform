@@ -8,9 +8,39 @@ Read this if you need to start services, inspect health, or understand where out
 
 | Mode | How it is selected | Use it for | Important detail |
 | --- | --- | --- | --- |
-| Hugging Face inference | Default or `INFERENCE_BACKEND=huggingface` | Local adapter-based serving | Uses one base model plus hot-swapped tenant adapters |
+| HF Serverless Inference | `INFERENCE_BACKEND=hf_inference` or `make serve-hf-inference` | Zero-GPU demo / HF Spaces | Routes to HF Inference API; free tier rate-limited ~100 req/hr |
+| Hugging Face local | `INFERENCE_BACKEND=hf` | Local adapter-based serving | Uses one base model plus hot-swapped tenant adapters |
 | Ollama inference | `INFERENCE_BACKEND=ollama` or `make serve-ollama` | AMD-friendly local serving | Model names are resolved per tenant and model type |
+| Auto | `INFERENCE_BACKEND=auto` (default) | Development | Tries Ollama → HF Inference API (if `HF_TOKEN` set) → HF local |
 | Runtime-adaptive training | `DEVICE` and `USE_4BIT` env vars | SFT and DPO across CUDA, ROCm, or CPU | Falls back when 4-bit or GPU support is unavailable |
+
+## Hugging Face Hub
+
+All Hub operations require `HF_TOKEN` (write-scoped) in your `.env`.
+Repos default to **public** (enables free HF Inference API serving). Set `HF_REPO_PRIVATE=true` to restrict.
+
+| Goal | Command | Output |
+| --- | --- | --- |
+| Push adapter metadata | `make push-hub` | Config/tokenizer files only (no weights — safe, fast) |
+| Push adapter + weights | `make push-hub-weights` | Adds `.safetensors` files (~200-600 MB per adapter) |
+| Push merged full model | `make push-hub-merged` | Full model from `models/merged/` (~3 GB) |
+| Push as private repos | `make push-hub-private` | Same as `push-hub` but creates private repos |
+| Preview without uploading | `make push-hub-dry` | Dry-run, no network calls |
+| Push SFT/DPO datasets | `make push-datasets` | JSONL files → dataset repos on Hub |
+| Preview dataset push | `make push-datasets-dry` | Dry-run |
+| Generate Colab notebook | `make generate-colab` | Writes `notebooks/train_on_colab.ipynb` |
+| Build demo Docker image | `make docker-build` | Bundles API + Next.js UI for HF Spaces |
+| Run demo image locally | `make docker-run` | Runs on port 7860 with `.env` vars |
+
+Hub repo naming convention:
+- Adapters: `deepaucksharma/multi-tenant-llm-{tenant}-{type}` (e.g. `…-sis-sft`)
+- Merged: `deepaucksharma/multi-tenant-llm-{tenant}-{type}-merged`
+- Datasets: `deepaucksharma/multi-tenant-llm-{tenant}-{type}-data`
+
+HF Inference API model resolution order (most specific wins):
+```
+HF_INFERENCE_MODEL_{TENANT}_{TYPE}  →  HF_INFERENCE_MODEL_{TENANT}  →  HF_INFERENCE_MODEL  →  Qwen/Qwen2.5-1.5B-Instruct
+```
 
 ## Key Commands
 

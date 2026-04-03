@@ -129,6 +129,12 @@ def train_sft(tenant_id: str, config_override: dict = None):
         # ---- Configure trainer ----
         from transformers import TrainingArguments
         from trl import SFTTrainer
+        
+        if runtime_cfg["device"] == "dml":
+            import torch_directml
+            logger.info("Monkeypatching HuggingFace Trainer device for DirectML...")
+            TrainingArguments.device = property(lambda self: torch_directml.device())
+            TrainingArguments.n_gpu = property(lambda self: 1)
 
         output_dir = train_cfg["output_dir"]
         Path(output_dir).mkdir(parents=True, exist_ok=True)

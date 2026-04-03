@@ -57,6 +57,8 @@ fi
 echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.0.2 $ROCM_REPO main" \
     | sudo tee /etc/apt/sources.list.d/rocm.list
 
+echo -e 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1001' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+
 sudo apt update
 
 # Step 4: Install ROCm

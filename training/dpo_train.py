@@ -181,8 +181,17 @@ def train_dpo(
             )
             ref_model = ref_model.merge_and_unload()
 
-        # ---- Configure DPO Trainer ----
-        from trl import DPOTrainer, DPOConfig
+        # ---- Configure Trainer ----
+        from transformers import TrainingArguments
+        from trl import DPOTrainer
+        
+        if runtime_cfg["device"] == "dml":
+            import torch_directml
+            logger.info("Monkeypatching HuggingFace Trainer device for DirectML...")
+            TrainingArguments.device = property(lambda self: torch_directml.device())
+            TrainingArguments.n_gpu = property(lambda self: 1)
+
+        from trl import DPOConfig
 
         dpo_training_config = DPOConfig(
             output_dir=output_dir,
